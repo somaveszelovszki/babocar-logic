@@ -1,4 +1,5 @@
 #include <babocar-core/container/ring_buffer.hpp>
+#include <babocar-core/ros_node.hpp>
 
 #include <ros/ros.h>
 #include <nav_msgs/OccupancyGrid.h>
@@ -7,7 +8,7 @@ using namespace bcr;
 
 const std::string PARAM_OCCUPANCY_LIMIT = "occupancy_limit";
 
-ros::NodeHandle *node = nullptr;
+std::unique_ptr<RosNode> node = nullptr;
 
 ring_buffer<nav_msgs::OccupancyGrid::ConstPtr, 10> mapSamples;
 nav_msgs::OccupancyGrid staticGrid;
@@ -17,7 +18,7 @@ void occupancyGridCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
     ROS_INFO("map size: %d x %d", msg->info.width, msg->info.height);
 
     if (!mapSamples.empty() && (mapSamples[0]->info.width != msg->info.width || mapSamples[0]->info.height != msg->info.height || mapSamples[0]->info.resolution != msg->info.resolution)) {
-        throw std::runtime_error("Map dimensions do not match! TODO handle different occupancy grid dimensions");
+        throw std::invalid_argument("Map dimensions do not match! TODO handle different occupancy grid dimensions");
     }
 
     staticGrid.header = msg->header;
@@ -32,7 +33,7 @@ void occupancyGridCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
         nav_msgs::OccupancyGrid::_data_type::const_iterator itNew = msg->data.begin(), itPrev = mapSamples[mapSamples.size() - 1]->data.begin();
         nav_msgs::OccupancyGrid::_data_type::iterator itRes = staticGrid.data.begin();
 
-        const int32_t occupancyLimit = node->param<int32_t>(PARAM_OCCUPANCY_LIMIT, 50);
+        const int32_t occupancyLimit = node->getParameter<int32_t>(PARAM_OCCUPANCY_LIMIT);
 
         for (; itNew != msg->data.end(); ++itNew, ++itPrev, ++itRes) {
             if (*itNew > 100 || *itNew < 0 || *itPrev > 100 || *itPrev < 0) {   // filters out invalid values
@@ -53,17 +54,18 @@ void occupancyGridCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
 
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "environment_builder__static_points");
-    node = new ros::NodeHandle();
-    ros::Rate rate(1);
+    static const std::string NODE_NAME = "environment_builder__static_points";
+    ros::init(argc, argv, NODE_NAME);
+    node.reset(new RosNode(NODE_NAME, millisecond_t(100)));
+
     ros::Subscriber sub_occupancyGrid = node->subscribe("map", 1, occupancyGridCallback);
-    ros::Publisher pub_staticMap = node->advertise<nav_msgs::OccupancyGrid>("static-map", 1);
+    ros::Publisher pub_staticMap = node->advertise<nav_msgs::OccupancyGrid>("static_map", 1);
 
     while(ros::ok()) {
         ROS_INFO("Running");
         ros::spinOnce();
         pub_staticMap.publish(staticGrid);
-        rate.sleep();
+        node->rate.sleep();
     }
 
     ROS_INFO("Program ended.");
