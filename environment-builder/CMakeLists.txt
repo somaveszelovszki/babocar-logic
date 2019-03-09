@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   geometry_msgs
   message_generation
+  tf
   babocar-core
 )
 
@@ -125,7 +126,7 @@ include_directories(
 
 ## Declare a C++ library
 add_library(${PROJECT_NAME}
-  src/dummy.cpp
+  src/absolute_map.cpp
 )
 
 ## Add cmake target dependencies of the library
@@ -136,11 +137,9 @@ add_library(${PROJECT_NAME}
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-add_executable(dynamic_objects src/dynamic_objects.cpp)
-target_link_libraries(dynamic_objects ${catkin_LIBRARIES} )
+add_executable(decomposer src/decomposer.cpp)
+target_link_libraries(decomposer ${catkin_LIBRARIES} environment-builder)
 
-add_executable(static_points src/static_points.cpp)
-target_link_libraries(static_points ${catkin_LIBRARIES} )
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
