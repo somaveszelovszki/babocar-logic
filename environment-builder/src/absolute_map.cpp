@@ -6,7 +6,7 @@
 
 using namespace bcr;
 
-void AbsoluteMap::initialize(distance_t _size, distance_t _resolution) {
+void AbsoluteMap::initialize(meter_t _size, meter_t _resolution) {
     this->size_ = _size;
     this->resolution_ = _resolution;
     this->row_size_ = _size / _resolution;
@@ -23,15 +23,15 @@ void AbsoluteMap::set(const Point2i& pos, CellState state) {
     this->cells.at(pos.Y * this->row_size_ + pos.X) = state;
 }
 
-AbsoluteMap::CellState AbsoluteMap::getNearest(const Point2<distance_t>& point) const {
+AbsoluteMap::CellState AbsoluteMap::getNearest(const Point2m& point) const {
     return this->get(this->getNearestIndexes(point));
 }
 
-void AbsoluteMap::setNearest(const Point2<distance_t>& point, AbsoluteMap::CellState state) {
+void AbsoluteMap::setNearest(const Point2m& point, AbsoluteMap::CellState state) {
     this->set(this->getNearestIndexes(point), state);
 }
 
-void AbsoluteMap::setRay(const Point2<distance_t>& center, const Point2<distance_t>& rayEnd) {
+void AbsoluteMap::setRay(const Point2m& center, const Point2m& rayEnd) {
     const Point2i centerPos = this->getNearestIndexes(center);
     const Point2f rayEndPos = static_cast<Point2f>(this->getNearestIndexes(rayEnd));
     const float32_t rayLength = centerPos.distance(rayEndPos);
@@ -73,9 +73,14 @@ void AbsoluteMap::setRay(const Point2<distance_t>& center, const Point2<distance
     }
 }
 
-Point2i AbsoluteMap::getNearestIndexes(const Point2<distance_t>& point) const {
+Point2i AbsoluteMap::getNearestIndexes(const Point2m& point) const {
     return { 
-        this->center.X + bcr::round(point.X / this->resolution_), 
-        this->center.Y + bcr::round(point.Y / this->resolution_) 
+        bcr::clamp(this->center.X + bcr::round(point.X / this->resolution_), 0, this->row_size_ - 1),
+        bcr::clamp(this->center.Y + bcr::round(point.Y / this->resolution_), 0, this->row_size_ - 1)
     };
+}
+
+bool AbsoluteMap::isInside(const Point2m& point) const {
+    return bcr::isBtw(point.X, -this->size_ / 2, this->size_ / 2) &&
+        bcr::isBtw(point.Y, -this->size_ / 2, this->size_ / 2);
 }
