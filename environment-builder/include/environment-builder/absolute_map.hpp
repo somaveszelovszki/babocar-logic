@@ -21,6 +21,8 @@ public:
 
     CellState get(const Point2i& pos) const;
 
+    CellState get(int32_t x, int32_t y) const;
+
     void set(const Point2i& pos, CellState state);
 
     CellState getNearest(const Point2m& point) const;
@@ -32,6 +34,8 @@ public:
     Point2i getNearestIndexes(const Point2m& point) const;
 
     bool isInside(const Point2m& point) const;
+
+    uint32_t numObstacleNeighbours(const Point2i& point, uint32_t delta) const;
 
 private:
     Point2i center;

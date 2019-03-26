@@ -19,11 +19,14 @@
 #include <vector>
 #include <algorithm>
 
+//#define SCAN_TOPIC "scan"
+#define SCAN_TOPIC "lidar_scan"
+
 using namespace bcr;
 
 namespace {
 
-constexpr distance_t MAP_SIZE = meter_t(10);
+constexpr distance_t MAP_SIZE = meter_t(20);
 constexpr distance_t MAP_RES = centimeter_t(5);
 
 class DecomposerNode : public RosNode {
@@ -62,7 +65,7 @@ Point2m rayDistToAbsPoint(radian_t angle, meter_t dist) {
     geometry_msgs::PointStamped laser_point;
     geometry_msgs::PointStamped base_point;
 
-    laser_point.header.frame_id = "lidar_scan";
+    laser_point.header.frame_id = SCAN_TOPIC;
     laser_point.header.stamp = ros::Time();
     laser_point.point.x = dist.get() * bcr::cos(angle);
     laser_point.point.y = dist.get() * bcr::sin(angle);
@@ -97,6 +100,7 @@ struct LaserMeas {
     Odometry odom;
     //bcr::vec<Point2m, MAX_SCAN_SAMPLES> points;
     std::vector<Point2i> points;
+    std::vector<Point2m> points_m;
 };
 
 ring_buffer<LaserMeas, 5> prevScans;
@@ -115,6 +119,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     LaserMeas meas;
     meas.odom = carOdom;
     meas.points.reserve(count);
+    meas.points_m.reserve(count);
 
     staticScan = *scan;
 
@@ -158,30 +163,127 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             if (absMap.isInside(absPoint)) {
                 const Point2i absMapPoint = absMap.getNearestIndexes(absPoint);
                 meas.points.push_back(absMapPoint);  // stores quantated point
-                ROS_INFO("%f, %f -> %d, %d", absPoint.X.get(), absPoint.Y.get(), absMapPoint.X, absMapPoint.Y);
+                meas.points_m.push_back(absPoint);
+                absMap.set(absMapPoint, AbsoluteMap::CellState::OCCUPIED);
             }
             
         }
     }
 
     if (prevScans.size() >= 1) { // checks if enough samples have been collected
+
+        std::vector<std::pair<uint32_t, Point2i>> diffPoints;
+
         const LaserMeas& prev = prevScans[prevScans.size() - 1];
         // TODO prevprev and so on... (num of prevs as parameter)
 
-        for (uint32_t i = 0; i < meas.points.size(); ++i) {
-            const Point2i p = meas.points[i];
+        // for (uint32_t i = 0; i < meas.points.size(); ++i) {
+        //     const Point2i& p = meas.points[i];
+        //     bool found = false;
+        //     for (const Point2i& p_prev : prev.points) {
+        //         if (p == p_prev) {
+        //             found = true;
+        //             break;
+        //         }
+        //     }
+            
+        //     if (!found) {
+        //         ROS_INFO("%d: (%d, %d) not found", i, p.X, p.Y);
+        //         diffGrid.data[p.Y * diffGrid.info.width + p.X] = 100;
+        //         diffPoints.push_back({ i, p });
+        //     }
+        // }
+
+        for (uint32_t i = 0; i < meas.points_m.size(); ++i) {
+            
+            // checks if correspondent point can be found in the previous measurement
+            // if yes, it means point is a static point
+            // if no, then dynamic
+            
+            const Point2m& p = meas.points_m[i];
+            //const meter_t limit = bcr::clamp(p.length() * scan->angle_increment, meter_t(0.02f), meter_t(0.2f));
+            const meter_t limit = p.length() * scan->angle_increment / 4;
             bool found = false;
-            for (uint32_t j = 0; j < prev.points.size(); ++j) {
-                if (p == prev.points[j]) {
+            for (const Point2m& p_prev : prev.points_m) {
+                if (p.distance(p_prev) < limit) {
                     found = true;
                     break;
                 }
             }
             
             if (!found) {
-                diffGrid.data[p.Y * diffGrid.info.width + p.X] = 100;
+                const Point2i& p_i = meas.points[i];
+                ROS_INFO("%d: (%d, %d) not found", i, p_i.X, p_i.Y);
+                diffGrid.data[p_i.Y * diffGrid.info.width + p_i.X] = 100;
+                diffPoints.push_back({ i, p_i });
             }
         }
+
+        ROS_INFO("Removing noise");
+
+        for (uint32_t i = 0; i < diffPoints.size(); ++i) {
+            const std::pair<uint32_t, Point2i>& p = diffPoints[i];
+
+            //uint32_t count = 0;
+
+            // TODO compare with prevIdx, nextIdx, not for loop (easier to read)
+
+            const uint32_t prevIdx = bcr::sub_underflow(i, 1, diffPoints.size());
+            const uint32_t nextIdx = bcr::add_overflow(i, 1, diffPoints.size());
+
+            const uint32_t prevRayIdx = bcr::sub_underflow(p.first, 1, meas.points.size());
+            const uint32_t nextRayIdx = bcr::add_overflow(p.first, 1, meas.points.size());
+
+            ROS_INFO("idx: %d, %d, %d (%d)", i, prevIdx, nextIdx, diffPoints.size());
+            ROS_INFO("ray: %d, %d, %d (%d)", p.first, prevRayIdx, nextRayIdx, meas.points.size());
+
+            if (diffPoints[prevIdx].first != prevRayIdx || diffPoints[nextIdx].first != nextRayIdx) {
+                ROS_INFO("%d: (%d, %d) will be removed", p.first, p.second.X, p.second.Y);
+                diffGrid.data[p.second.Y * diffGrid.info.width + p.second.X] = 0;
+            }
+
+            //if (absMap.numObstacleNeighbours(*it, 1) <= 2) {
+            // if (count < 2) {
+            //     ROS_INFO("(%d, %d) will be removed", p.second.X, p.second.Y);
+            //     diffGrid.data[p.second.Y * diffGrid.info.width + p.second.X] = 0;
+            // }
+        }
+
+        // for (std::vector<std::pair<uint32_t, Point2i>>::iterator it = diffPoints.begin(); it != diffPoints.end();) {
+        //     // removes diff points that have 0 or 1 neighbours (noise)
+
+        //     // search delta defines the distance around the point where we are searching for diff points
+        //     // e.g. if delta == 2, then we are searching in the region where the Xs are:
+        //     // 
+        //     // X X X X X
+        //     // X X X X X
+        //     // X X 0 X X
+        //     // X X X X X
+        //     // X X X X X
+        //     //
+        //     // this region must be expanded as the distance is growing, because the lidar rays are not parallel
+        //     // (therefore two neighbouring measurements are farther from each other than in case of a nearer measurement)
+        //     const int32_t delta = 1 + it->second.length() / 3;
+
+        //     const uint32_t minCount = 2 + it->second.length() / 3;
+        //     uint32_t count = 0;
+        //     for (std::vector<std::pair<uint32_t, Point2i>>::iterator it2 = diffPoints.begin(); it2 != diffPoints.end(); ++it2) {
+        //         if (it != it2 && std::abs(it->second.X - it2->second.X) <= delta && std::abs(it->second.Y - it2->second.Y) <= delta) {
+        //             ++count;
+        //         }
+        //     }
+
+        //     //if (absMap.numObstacleNeighbours(*it, 1) <= 2) {
+        //     if (count < minCount) {
+        //         ROS_INFO("(%d, %d) will be removed", it->second.X, it->second.Y);
+        //         diffGrid.data[it->second.Y * diffGrid.info.width + it->second.X] = 0;
+        //         //it = diffPoints.erase(it);
+        //     } else {
+        //         //++it;
+        //     }
+
+        //     ++it;
+        // }
 
         //KMeans massCenters(meas.points);
         //uint32_t numObstacles = 5;  // TODO
@@ -203,7 +305,7 @@ int main(int argc, char **argv)
     static const std::string NODE_NAME = "environment_builder__decomposer";
     ros::init(argc, argv, NODE_NAME);
     node.reset(new DecomposerNode(NODE_NAME));
-    ros::Subscriber scanSub = node->subscribe<sensor_msgs::LaserScan>("lidar_scan", 1, scanCallback);
+    ros::Subscriber scanSub = node->subscribe<sensor_msgs::LaserScan>(SCAN_TOPIC, 1, scanCallback);
     ros::Subscriber odomSub = node->subscribe<nav_msgs::Odometry>("odom", 1, odomCallback);
 
     ros::Publisher diffGridPublisher = node->advertise<nav_msgs::OccupancyGrid>("diff_grid", 10);

@@ -19,6 +19,10 @@ AbsoluteMap::CellState AbsoluteMap::get(const Point2i& pos) const {
     return this->cells.at(pos.Y * this->row_size_ + pos.X);
 }
 
+AbsoluteMap::CellState AbsoluteMap::get(int32_t x, int32_t y) const {
+    return this->cells.at(y * this->row_size_ + x);
+}
+
 void AbsoluteMap::set(const Point2i& pos, CellState state) {
     this->cells.at(pos.Y * this->row_size_ + pos.X) = state;
 }
@@ -83,4 +87,23 @@ Point2i AbsoluteMap::getNearestIndexes(const Point2m& point) const {
 bool AbsoluteMap::isInside(const Point2m& point) const {
     return bcr::isBtw(point.X, -this->size_ / 2, this->size_ / 2) &&
         bcr::isBtw(point.Y, -this->size_ / 2, this->size_ / 2);
+}
+
+uint32_t AbsoluteMap::numObstacleNeighbours(const Point2i& point, uint32_t delta) const {
+    const int32_t minX = std::max(point.X - static_cast<int32_t>(delta), 0);
+    const int32_t minY = std::max(point.Y - static_cast<int32_t>(delta), 0);
+    const int32_t maxX = std::max(point.X + static_cast<int32_t>(delta), this->row_size_ - 1);
+    const int32_t maxY = std::max(point.Y + static_cast<int32_t>(delta), this->row_size_ - 1);
+
+    uint32_t count = 0;
+
+    for (int32_t x = minX; x < maxX; ++x) {
+        for (int32_t y = minY; y < maxY; ++y) {
+            if (this->get(x, y) == CellState::OCCUPIED) {
+                ++count;
+            }
+        }
+    }
+
+    return count;
 }
