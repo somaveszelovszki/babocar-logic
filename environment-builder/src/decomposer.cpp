@@ -96,11 +96,28 @@ static constexpr uint32_t MAX_SCAN_SAMPLES = 400;
 
 AbsoluteMap absMap;
 
+struct AbsPoint {
+    uint32_t idx;
+    Point2m absPos;
+    Point2i gridPos;
+};
+
 struct LaserMeas {
     Odometry odom;
     //bcr::vec<Point2m, MAX_SCAN_SAMPLES> points;
-    std::vector<Point2i> points;
-    std::vector<Point2m> points_m;
+    std::vector<AbsPoint> points;
+};
+
+struct Group {
+    Point2m center;
+    std::vector<Point2m> points;
+    uint32_t numDynamicPoints;
+
+    Group() : numDynamicPoints(0) {}
+
+    bool isMoving() const {
+        return this->numDynamicPoints >= 2;
+    }
 };
 
 ring_buffer<LaserMeas, 5> prevScans;
@@ -112,6 +129,94 @@ std::vector<DynamicObject> dynamicObjects;
 
 ros::Publisher *diffGridPub = nullptr;
 
+bool isInSameObject(const AbsPoint& p, const AbsPoint& prev, const LaserMeas& meas, radian_t ray_angle_incr) {
+    bool connectable = true;
+    const meter_t eps = bcr::clamp(meter_t(p.absPos.length() * ray_angle_incr * 2), meter_t(0.1f), meter_t(0.4f));
+
+    if (p.absPos.distance(prev.absPos) > eps) {
+        const AbsPoint *p_prev = &prev;
+        for (int32_t i = bcr::incr_overflow(p_prev->idx, meas.points.size()); i != p.idx; i = bcr::incr_overflow(i, meas.points.size())) {
+            const AbsPoint& cur = meas.points[i];
+
+            if (cur.absPos.distance(p_prev->absPos) > eps) {
+                connectable = false;
+                break;
+            }
+        }
+    }
+
+    return connectable;
+}
+
+std::vector<Group> group(const std::vector<AbsPoint>& diffPoints, const LaserMeas& meas, radian_t ray_angle_incr) {
+    std::vector<Group> groups;
+
+    if (diffPoints.size() > 0 && meas.points.size() >= 2) {
+
+        //groups.push_back(Group());
+        Group *currentGroup = nullptr;
+        //Group *currentGroup = &groups[0];
+        //currentGroup->points.push_back(diffPoints[0].absPos);
+
+        const AbsPoint *p_prev = &meas.points[0];
+        int32_t startIdx = 1;
+        int32_t i = 1;
+
+        do {
+            const AbsPoint& p = meas.points[i];
+            const meter_t eps = bcr::clamp(meter_t(p.absPos.length() * ray_angle_incr * 2), meter_t(0.1f), meter_t(0.4f));
+
+            // if point is far from its neighbour, we start a new group (new object)
+            if (p.absPos.distance(p_prev->absPos) > eps) {
+                // saves index of the first point thas has already been added to a group
+                if (!currentGroup) {
+                    startIdx = i;
+                }
+                groups.push_back(Group());
+                currentGroup = &groups[groups.size() - 1];
+            }
+
+            if (currentGroup) {
+                currentGroup->points.push_back(p.absPos);
+                if (std::find_if(diffPoints.begin(), diffPoints.end(), [&p](const AbsPoint& diff_p) { return diff_p.idx == p.idx; }) != diffPoints.end()) {
+                    ++currentGroup->numDynamicPoints;
+                }
+            }
+
+            p_prev = &p;
+            i = bcr::incr_overflow(i, meas.points.size());
+
+        } while (i != startIdx);
+
+        // sorts points into groups
+        // for(const AbsPoint& p : diffPoints) {
+        //     const meter_t eps = p.absPos.length() * ray_angle_incr * 2;
+
+        //     // if point is far from its neighbour, we start a new group (new object)
+        //     if (p.absPos.distance(p_prev->absPos) > eps) {
+        //         groups.push_back(Group());
+        //         currentGroup = &groups[groups.size() - 1];
+        //     }
+
+        //     currentGroup->points.push_back(p.absPos);
+        //     p_prev = &p;
+        // }
+
+        for (Group& g : groups) {
+            g.center = { meter_t::ZERO(), meter_t::ZERO() };
+
+            if (g.isMoving()) {
+                for (const Point2m& p : g.points) {
+                    g.center += p;
+                }
+                g.center /= g.points.size();
+            }
+        }
+    }
+
+    return groups;
+}
+
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
     int32_t count = (scan->angle_max - scan->angle_min) / scan->angle_increment;
@@ -119,7 +224,6 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     LaserMeas meas;
     meas.odom = carOdom;
     meas.points.reserve(count);
-    meas.points_m.reserve(count);
 
     staticScan = *scan;
 
@@ -157,133 +261,87 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         const meter_t dist = meter_t(scan->ranges[i]);
 
         // filters out too near objects (false detection)
-        if (dist > centimeter_t(20) && !std::isinf(dist.get())) {
+        if (dist > centimeter_t(10) && !std::isinf(dist.get())) {
             const Point2m absPoint = rayDistToAbsPoint(angle, dist);
             //meas.points.push_back(absPoint);
-            if (absMap.isInside(absPoint)) {
-                const Point2i absMapPoint = absMap.getNearestIndexes(absPoint);
-                meas.points.push_back(absMapPoint);  // stores quantated point
-                meas.points_m.push_back(absPoint);
-                absMap.set(absMapPoint, AbsoluteMap::CellState::OCCUPIED);
-            }
-            
+            const Point2i absMapPoint = absMap.getNearestIndexes(absPoint);
+            meas.points.push_back({ i, absPoint, absMapPoint });
+            //absMap.set(absMapPoint, AbsoluteMap::CellState::OCCUPIED);
         }
     }
 
     if (prevScans.size() >= 1) { // checks if enough samples have been collected
 
-        std::vector<std::pair<uint32_t, Point2i>> diffPoints;
+        std::vector<AbsPoint> diffPoints;
 
         const LaserMeas& prev = prevScans[prevScans.size() - 1];
+
+        // finds difference points
         // TODO prevprev and so on... (num of prevs as parameter)
 
-        // for (uint32_t i = 0; i < meas.points.size(); ++i) {
-        //     const Point2i& p = meas.points[i];
-        //     bool found = false;
-        //     for (const Point2i& p_prev : prev.points) {
-        //         if (p == p_prev) {
-        //             found = true;
-        //             break;
-        //         }
-        //     }
-            
-        //     if (!found) {
-        //         ROS_INFO("%d: (%d, %d) not found", i, p.X, p.Y);
-        //         diffGrid.data[p.Y * diffGrid.info.width + p.X] = 100;
-        //         diffPoints.push_back({ i, p });
-        //     }
-        // }
-
-        for (uint32_t i = 0; i < meas.points_m.size(); ++i) {
+        for (uint32_t i = 0; i < meas.points.size(); ++i) {
             
             // checks if correspondent point can be found in the previous measurement
             // if yes, it means point is a static point
             // if no, then dynamic
             
-            const Point2m& p = meas.points_m[i];
-            //const meter_t limit = bcr::clamp(p.length() * scan->angle_increment, meter_t(0.02f), meter_t(0.2f));
-            const meter_t limit = p.length() * scan->angle_increment / 4;
+            const AbsPoint& p = meas.points[i];
+            //const meter_t eps = bcr::clamp(p.length() * scan->angle_increment, meter_t(0.02f), meter_t(0.2f));
+            const meter_t eps = p.absPos.length() * scan->angle_increment / 4;
             bool found = false;
-            for (const Point2m& p_prev : prev.points_m) {
-                if (p.distance(p_prev) < limit) {
+            for (const AbsPoint& p_prev : prev.points) {
+                if (p.absPos.distance(p_prev.absPos) < eps) {
                     found = true;
                     break;
                 }
             }
             
-            if (!found) {
-                const Point2i& p_i = meas.points[i];
-                ROS_INFO("%d: (%d, %d) not found", i, p_i.X, p_i.Y);
-                diffGrid.data[p_i.Y * diffGrid.info.width + p_i.X] = 100;
-                diffPoints.push_back({ i, p_i });
+            if (!found) {   // dynamic point
+                //ROS_INFO("possible diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
+                diffGrid.data[p.gridPos.Y * diffGrid.info.width + p.gridPos.X] = 100;
+                diffPoints.push_back(p);
             }
         }
 
-        ROS_INFO("Removing noise");
+        // removes noise - only keeps dynamic points that have left and right dynamic neighbours in the scan's ranges
+
+        std::vector<AbsPoint> filteredDiffPoints;
+        filteredDiffPoints.reserve(diffPoints.size());
 
         for (uint32_t i = 0; i < diffPoints.size(); ++i) {
-            const std::pair<uint32_t, Point2i>& p = diffPoints[i];
+            const AbsPoint& p = diffPoints[i];
 
-            //uint32_t count = 0;
+            const uint32_t prevIdx = bcr::decr_underflow(i, diffPoints.size());
+            const uint32_t nextIdx = bcr::incr_overflow(i, diffPoints.size());
 
-            // TODO compare with prevIdx, nextIdx, not for loop (easier to read)
+            const uint32_t prevRayIdx = bcr::decr_underflow(p.idx, count);
+            const uint32_t nextRayIdx = bcr::incr_overflow(p.idx, count);
 
-            const uint32_t prevIdx = bcr::sub_underflow(i, 1, diffPoints.size());
-            const uint32_t nextIdx = bcr::add_overflow(i, 1, diffPoints.size());
+            //ROS_INFO("idx: %d, %d, %d (%d)", i, prevIdx, nextIdx, diffPoints.size());
+            //ROS_INFO("ray: %d, %d, %d (%d)", p.idx, prevRayIdx, nextRayIdx, count);
 
-            const uint32_t prevRayIdx = bcr::sub_underflow(p.first, 1, meas.points.size());
-            const uint32_t nextRayIdx = bcr::add_overflow(p.first, 1, meas.points.size());
+            // checks if the stored dynamic points before and after the given dynamic point are from the neighbouring scans
+            // if yes, then current dynamic point is in a batch of dynamic points - we keep it
+            // if no, then current dynamic point is probably just noise - we drop it
 
-            ROS_INFO("idx: %d, %d, %d (%d)", i, prevIdx, nextIdx, diffPoints.size());
-            ROS_INFO("ray: %d, %d, %d (%d)", p.first, prevRayIdx, nextRayIdx, meas.points.size());
-
-            if (diffPoints[prevIdx].first != prevRayIdx || diffPoints[nextIdx].first != nextRayIdx) {
-                ROS_INFO("%d: (%d, %d) will be removed", p.first, p.second.X, p.second.Y);
-                diffGrid.data[p.second.Y * diffGrid.info.width + p.second.X] = 0;
+            if (diffPoints[prevIdx].idx != prevRayIdx || diffPoints[nextIdx].idx != nextRayIdx) {
+                //ROS_INFO("not diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
+                diffGrid.data[p.gridPos.Y * diffGrid.info.width + p.gridPos.X] = 0;
+            } else {
+                //ROS_INFO("diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
+                filteredDiffPoints.push_back(p);                
             }
-
-            //if (absMap.numObstacleNeighbours(*it, 1) <= 2) {
-            // if (count < 2) {
-            //     ROS_INFO("(%d, %d) will be removed", p.second.X, p.second.Y);
-            //     diffGrid.data[p.second.Y * diffGrid.info.width + p.second.X] = 0;
-            // }
         }
 
-        // for (std::vector<std::pair<uint32_t, Point2i>>::iterator it = diffPoints.begin(); it != diffPoints.end();) {
-        //     // removes diff points that have 0 or 1 neighbours (noise)
+        const std::vector<Group> groups = group(filteredDiffPoints, meas, radian_t(scan->angle_increment));
 
-        //     // search delta defines the distance around the point where we are searching for diff points
-        //     // e.g. if delta == 2, then we are searching in the region where the Xs are:
-        //     // 
-        //     // X X X X X
-        //     // X X X X X
-        //     // X X 0 X X
-        //     // X X X X X
-        //     // X X X X X
-        //     //
-        //     // this region must be expanded as the distance is growing, because the lidar rays are not parallel
-        //     // (therefore two neighbouring measurements are farther from each other than in case of a nearer measurement)
-        //     const int32_t delta = 1 + it->second.length() / 3;
-
-        //     const uint32_t minCount = 2 + it->second.length() / 3;
-        //     uint32_t count = 0;
-        //     for (std::vector<std::pair<uint32_t, Point2i>>::iterator it2 = diffPoints.begin(); it2 != diffPoints.end(); ++it2) {
-        //         if (it != it2 && std::abs(it->second.X - it2->second.X) <= delta && std::abs(it->second.Y - it2->second.Y) <= delta) {
-        //             ++count;
-        //         }
-        //     }
-
-        //     //if (absMap.numObstacleNeighbours(*it, 1) <= 2) {
-        //     if (count < minCount) {
-        //         ROS_INFO("(%d, %d) will be removed", it->second.X, it->second.Y);
-        //         diffGrid.data[it->second.Y * diffGrid.info.width + it->second.X] = 0;
-        //         //it = diffPoints.erase(it);
-        //     } else {
-        //         //++it;
-        //     }
-
-        //     ++it;
-        // }
+        for (const Group& g : groups) {
+            if (g.isMoving()) {
+                ROS_INFO("Group center: %f, %f", g.center.X.get(), g.center.Y.get());
+                const Point2i gridPos = absMap.getNearestIndexes(g.center);
+                //diffGrid.data[gridPos.Y * diffGrid.info.width + gridPos.X] = 100;
+            }
+        }
 
         //KMeans massCenters(meas.points);
         //uint32_t numObstacles = 5;  // TODO
@@ -297,7 +355,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 
 void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
     carOdom = bcr::ros_convert(*odom);
-    ROS_INFO("Car pos: [%f, %f] m, orientation: %f deg", static_cast<meter_t>(carOdom.pose.X).get(), static_cast<meter_t>(carOdom.pose.Y).get(), static_cast<radian_t>(carOdom.pose.angle).get());
+    //ROS_INFO("Car pos: [%f, %f] m, orientation: %f deg", static_cast<meter_t>(carOdom.pose.X).get(), static_cast<meter_t>(carOdom.pose.Y).get(), static_cast<radian_t>(carOdom.pose.angle).get());
 }
 
 int main(int argc, char **argv)
