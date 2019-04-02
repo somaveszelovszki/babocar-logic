@@ -83,10 +83,11 @@ struct AbsPoint {
     enum class State {
         UNKNOWN,
         STATIC,
-        DYNAMIC
+        DYNAMIC_NEG,    // negative-dynamic point (distant point visible after closer object has passed)
+        DYNAMIC_POS     // positive-dynamic point (object passing in front of a distant point)
     };
 
-    uint32_t idx;
+    int32_t idx;
     Point2m absPos;
     Point2i gridPos;
     State state;
@@ -107,6 +108,7 @@ struct LaserMeas {
     meter_t getDistance(radian_t angle) const {
         meter_t dist;
 
+        // TODO use current odom as offset
         if (angle.get() < this->scan->angle_min || angle.get() > this->scan->angle_max) {
             dist = distance_t::ZERO();
         } else {
@@ -127,11 +129,18 @@ struct LaserMeas {
 };
 
 struct Group {
+    static constexpr int32_t INVALID_IDX = -1;
+    int32_t idx;
+    bool forced;    // indicates if group has not been detected in the current measurement, but has been forced to exist (filtering)
     Point2m center;
     std::vector<AbsPoint*> points;
 
+    Group()
+        : idx(INVALID_IDX)
+        , forced(false) {}
+
     bool isMoving() const {
-        return std::count_if(this->points.begin(), this->points.end(), [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC; }) >= 2;
+        return this->forced || std::count_if(this->points.begin(), this->points.end(), [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC_POS; }) >= 2;
     }
 };
 
@@ -140,7 +149,10 @@ meter_t getDistInDirection(const LaserMeas& meas, const Point2m& p) {
     return meas.getDistance(angle);
 }
 
-ring_buffer<LaserMeas, 5> prevScans;
+static constexpr uint32_t NUM_PREV_COMPARE = 5;
+
+ring_buffer<LaserMeas, NUM_PREV_COMPARE + 1> prevScans;
+ring_buffer<std::vector<Group>, NUM_PREV_COMPARE + 1> prevGroupsList;
 
 sensor_msgs::LaserScan staticScan;
 nav_msgs::OccupancyGrid diffGrid;
@@ -149,29 +161,12 @@ std::vector<DynamicObject> dynamicObjects;
 
 ros::Publisher *diffGridPub = nullptr;
 
-bool isInSameObject(const AbsPoint& p, const AbsPoint& prev, const LaserMeas& meas, radian_t ray_angle_incr) {
-    bool connectable = true;
-    const meter_t eps = bcr::clamp(meter_t(p.absPos.length() * ray_angle_incr * 2), meter_t(0.1f), meter_t(0.4f));
+int32_t maxGroupIdx = Group::INVALID_IDX;
 
-    if (p.absPos.distance(prev.absPos) > eps) {
-        const AbsPoint *p_prev = &prev;
-        for (int32_t i = bcr::incr_overflow(p_prev->idx, meas.points.size()); i != p.idx; i = bcr::incr_overflow(i, meas.points.size())) {
-            const AbsPoint& cur = meas.points[i];
-
-            if (cur.absPos.distance(p_prev->absPos) > eps) {
-                connectable = false;
-                break;
-            }
-        }
-    }
-
-    return connectable;
-}
-
-std::vector<Group> makeGroups(const std::vector<AbsPoint*>& diffPoints, LaserMeas& meas, radian_t ray_angle_incr) {
+std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr) {
     std::vector<Group> groups;
 
-    if (diffPoints.size() > 0 && meas.points.size() >= 2) {
+    if (meas.points.size() >= 2) {
 
         Group *currentGroup = nullptr;  // TODO use iterator
         const AbsPoint *p_prev = &meas.points[0];
@@ -235,6 +230,8 @@ std::vector<Group> makeGroups(const std::vector<AbsPoint*>& diffPoints, LaserMea
 
         } while (i != startIdx);
 
+        // TODO cut off wall from objects near it
+
         for (std::vector<Group>::iterator it = groups.begin(); it != groups.end(); ) {
             switch(it->points.size()) {
                 case 1:
@@ -246,7 +243,7 @@ std::vector<Group> makeGroups(const std::vector<AbsPoint*>& diffPoints, LaserMea
                 default:
                     if (it->isMoving()) {
                         for (AbsPoint *p : it->points) {
-                            p->state = AbsPoint::State::DYNAMIC;
+                            p->state = AbsPoint::State::DYNAMIC_POS;
                             it->center += p->absPos;
                         }
                         it->center /= it->points.size();
@@ -263,12 +260,12 @@ std::vector<Group> makeGroups(const std::vector<AbsPoint*>& diffPoints, LaserMea
     return groups;
 }
 
-int xasd = 0;
-
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
-    LaserMeas meas(scan);
-    meas.odom = carOdom;
+    prevScans.emplace_back(scan);
+    LaserMeas& meas = prevScans[prevScans.size() - 1];
+    //meas.odom = carOdom;
+    meas.odom = bcr::Odometry();    // TODO carOdom
 
     staticScan = *scan;
 
@@ -310,63 +307,53 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             const Point2m absPoint = rayDistToAbsPoint(angle, dist);
             //meas.points.push_back(absPoint);
             const Point2i absMapPoint = absMap.getNearestIndexes(absPoint);
-            meas.points.push_back({ i, absPoint, absMapPoint, AbsPoint::State::UNKNOWN });
+            meas.points.push_back({ i, absPoint, absMapPoint, AbsPoint::State::UNKNOWN });            
             //absMap.set(absMapPoint, AbsoluteMap::CellState::OCCUPIED);
         }
     }
 
-    static constexpr uint32_t NUM_PREV_COMPARE = 5;
-
-    if (prevScans.size() >= NUM_PREV_COMPARE) { // checks if enough samples have been collected
+    if (prevScans.size() >= NUM_PREV_COMPARE + 1) { // checks if enough samples have been collected
 
         std::vector<AbsPoint*> diffPoints;
 
         // checks last NUM_PREV_COMPARE measurements, if point is not present in any of them, marks it as dynamic point
 
         for (uint32_t i = 0; i < meas.points.size(); ++i) {
+            AbsPoint& p = meas.points[i];
 
             for (uint32_t s = 1; s <= NUM_PREV_COMPARE; ++s) {
-                const uint32_t id = bcr::sub_underflow(prevScans.size(), s, prevScans.size());
-                const LaserMeas& prev = prevScans[id];
+                const LaserMeas& prev = prevScans[bcr::sub_underflow(prevScans.size() - 1, s, prevScans.size())];
 
                 // checks if correspondent point can be found in the previous measurement
                 // if yes, it means point is a static point
                 // if no, then dynamic
 
-                AbsPoint& p = meas.points[i];
-                //const meter_t eps = bcr::clamp(p.length() * scan->angle_increment, meter_t(0.02f), meter_t(0.2f));
                 const meter_t eps = p.absPos.length() * scan->angle_increment / 4;
-                bool found = false;
-                for (const AbsPoint& p_prev : prev.points) {
-                    if (p.absPos.distance(p_prev.absPos) < eps) {
-                        found = true;
-                        break;
-                    }
-                }
 
                 // if point is not found in one of the previous measurements, it may be a dynamic point
                 // but first checks if current distance is smaller than the previous, otherwise it is not a moving object that we have detected,
                 // but the wall behind an object that is moving away
-                if (!found) {
-
+                if (std::find_if(prev.points.begin(), prev.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absPos.distance(prevPoint.absPos) < eps; }) == prev.points.end()) {
                     const meter_t cur_dist = meter_t(scan->ranges[p.idx]);
                     const meter_t prev_dist = getDistInDirection(prev, p.absPos);
 
-                    if (cur_dist < prev_dist + centimeter_t(50)) {
-                        //ROS_INFO("possible diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
-                        //diffGrid.data[p.gridPos.Y * diffGrid.info.width + p.gridPos.X] = 100;
-                        p.state = AbsPoint::State::DYNAMIC;
+                    //ROS_INFO("possible diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
+
+                    if (cur_dist < prev_dist + centimeter_t(20)) {
+                        p.state = AbsPoint::State::DYNAMIC_POS;
                         diffPoints.push_back(&p);
-                        break;
+                        //diffGrid.data[p.gridPos.Y * diffGrid.info.width + p.gridPos.X] = 100;
                     }
+
+                    break;
                 }
             }
         }
 
         // removes noise - only keeps dynamic points that have left and right dynamic neighbours in the scan's ranges
 
-        std::vector<AbsPoint*> filteredDiffPoints;
-        filteredDiffPoints.reserve(diffPoints.size());
+        //std::vector<AbsPoint*> filteredDiffPoints;
+        //filteredDiffPoints.reserve(diffPoints.size());
 
         for (uint32_t i = 0; i < diffPoints.size(); ++i) {
             AbsPoint *p = diffPoints[i];
@@ -386,32 +373,87 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 
             if (diffPoints[prevIdx]->idx != prevRayIdx || diffPoints[nextIdx]->idx != nextRayIdx) {
                 //ROS_INFO("not diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
-                diffGrid.data[p->gridPos.Y * diffGrid.info.width + p->gridPos.X] = 0;
+                //diffGrid.data[p->gridPos.Y * diffGrid.info.width + p->gridPos.X] = 0;
                 p->state = AbsPoint::State::UNKNOWN;
             } else {
                 //ROS_INFO("diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
-                filteredDiffPoints.push_back(p);                
+                //filteredDiffPoints.push_back(p);                
             }
         }
 
-        const std::vector<Group> groups = makeGroups(filteredDiffPoints, meas, radian_t(scan->angle_increment));
+        std::vector<Group> groups = makeGroups(meas, radian_t(scan->angle_increment));
 
-        for (const Group& g : groups) {
-            if (g.isMoving()) {
-                ROS_INFO("Group center: %f, %f", g.center.X.get(), g.center.Y.get());
-                for (const AbsPoint *p : g.points) {
-                    //ROS_INFO("    group point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
-                    diffGrid.data[p->gridPos.Y * diffGrid.info.width + p->gridPos.X] = 100;
+        // finds moving objects 
+        if (prevGroupsList.size() >= 2) {
+            const std::vector<Group>& prevGroups = prevGroupsList[prevGroupsList.size() - 1];
+
+            for (Group& g : groups) {
+                if (g.isMoving()) {
+
+                    meter_t minDist = centimeter_t(40);
+                    for (const Group& prev : prevGroups) {
+                        if (prev.isMoving()) {
+                            const meter_t dist = prev.center.distance(g.center);
+                            //ROS_INFO("dist: %f", dist.get());
+                            if (dist < minDist) {
+                                minDist = dist;
+                                g.idx = prev.idx;
+                            }
+                        }
+                    }
+
+                    if (g.idx == Group::INVALID_IDX) {
+                        g.idx = ++maxGroupIdx;
+                    }
+                }
+            }
+
+            for (const Group& prev : prevGroups) {
+                if (!prev.forced && prev.isMoving()) {
+                    bool found = false;
+                    for (const Group& g : groups) {
+                        if (prev.idx == g.idx) {
+                            found = true;
+                            break;
+                        }
+                    }
+
+                    if (!found) {
+                        Group g;
+                        g.idx = prev.idx;
+                        g.center = prev.center; // TODO + speed * dt
+                        g.forced = true;
+                        groups.push_back(g);
+                    }
+                }
+
+            }
+
+            for (const Group& g : groups) {
+                if (g.isMoving()) {
+                    const char *forced = g.forced ? " (forced)" : "";
+                    ROS_INFO("Group #%d: %f, %f%s", g.idx, g.center.X.get(), g.center.Y.get(), forced);
+                    for (const AbsPoint *p : g.points) {
+                        //ROS_INFO("    group point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
+                        diffGrid.data[p->gridPos.Y * diffGrid.info.width + p->gridPos.X] = 100;
+                    }
+                }
+            }
+
+        } else {
+            for (Group& g : groups) {
+                if (g.isMoving()) {
+                    g.idx = ++maxGroupIdx;
                 }
             }
         }
+
+        prevGroupsList.append(groups);
 
         //KMeans massCenters(meas.points);
         //uint32_t numObstacles = 5;  // TODO
         //const std::vector<KMeans::Group> groups = massCenters.run(numObstacles);
     }
-
-    prevScans.append(meas);
 
     diffGridPub->publish(diffGrid);
 }
