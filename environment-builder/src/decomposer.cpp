@@ -7,6 +7,7 @@
 #include <babocar-core/ros/ros_convert.hpp>
 #include <environment-builder/dynamic_object.hpp>
 #include <environment-builder/absolute_map.hpp>
+#include <babocar-core/unit_utils.hpp>
 
 #include <ros/ros.h>
 #include <sensor_msgs/LaserScan.h>
@@ -95,13 +96,16 @@ struct AbsPoint {
 
 struct LaserMeas {
     sensor_msgs::LaserScan::ConstPtr scan;
+    millisecond_t time;
     int32_t count;
     Odometry odom;
     std::vector<AbsPoint> points;
     
     LaserMeas(const sensor_msgs::LaserScan::ConstPtr& scan)
-        : scan(scan) 
+        : scan(scan)
+        , time(second_t(scan->header.stamp.toSec()))
         , count((scan->angle_max - scan->angle_min) / scan->angle_increment) {
+
         this->points.reserve(count);
     }
 
@@ -134,6 +138,7 @@ struct Group {
     bool forced;    // indicates if group has not been detected in the current measurement, but has been forced to exist (filtering)
     Point2m center;
     std::vector<AbsPoint*> points;
+    Vec2<m_per_sec_t> speed;
 
     Group()
         : idx(INVALID_IDX)
@@ -150,6 +155,7 @@ meter_t getDistInDirection(const LaserMeas& meas, const Point2m& p) {
 }
 
 static constexpr uint32_t NUM_PREV_COMPARE = 5;
+static constexpr uint32_t NUM_SPEED_FILTER = 1;
 
 ring_buffer<LaserMeas, NUM_PREV_COMPARE + 1> prevScans;
 ring_buffer<std::vector<Group>, NUM_PREV_COMPARE + 1> prevGroupsList;
@@ -384,7 +390,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         std::vector<Group> groups = makeGroups(meas, radian_t(scan->angle_increment));
 
         // finds moving objects 
-        if (prevGroupsList.size() >= 2) {
+        if (prevGroupsList.size() >= NUM_SPEED_FILTER) {
             const std::vector<Group>& prevGroups = prevGroupsList[prevGroupsList.size() - 1];
 
             for (Group& g : groups) {
@@ -423,16 +429,32 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                         g.idx = prev.idx;
                         g.center = prev.center; // TODO + speed * dt
                         g.forced = true;
+                        g.speed = prev.speed;
                         groups.push_back(g);
                     }
                 }
 
             }
 
-            for (const Group& g : groups) {
+            const millisecond_t speedFilter_dt = meas.time - prevScans[bcr::sub_underflow(prevScans.size() - 1, NUM_SPEED_FILTER, prevScans.size())].time;
+
+            for (Group& g : groups) {
                 if (g.isMoving()) {
+
+                    const std::vector<Group>& prevGroups = prevGroupsList[bcr::sub_underflow(prevGroupsList.size(), NUM_SPEED_FILTER, prevGroupsList.size())];
+                    std::vector<Group>::const_iterator it;
+                    for (it = prevGroups.begin(); it != prevGroups.end(); ++it) {
+                        if (it->idx == g.idx) {
+                            break;
+                        }
+                    }
+
+                    if (it != prevGroups.end()) {
+                        g.speed = { (g.center.X - it->center.X) / speedFilter_dt, (g.center.Y - it->center.Y) / speedFilter_dt };
+                    }
+
                     const char *forced = g.forced ? " (forced)" : "";
-                    ROS_INFO("Group #%d: %f, %f%s", g.idx, g.center.X.get(), g.center.Y.get(), forced);
+                    ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } m/sec", g.idx, g.center.X.get(), g.center.Y.get(), forced, g.speed.X.get(), g.speed.Y.get());
                     for (const AbsPoint *p : g.points) {
                         //ROS_INFO("    group point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
                         diffGrid.data[p->gridPos.Y * diffGrid.info.width + p->gridPos.X] = 100;
