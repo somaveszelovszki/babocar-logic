@@ -12,6 +12,8 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   geometry_msgs
+  nav_msgs
+  visualization_msgs
   message_generation
   tf
   babocar-core

@@ -14,6 +14,7 @@
 #include <geometry_msgs/PointStamped.h>
 #include <nav_msgs/OccupancyGrid.h>
 #include <nav_msgs/Odometry.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 
@@ -137,12 +138,23 @@ struct Group {
     int32_t idx;
     bool forced;    // indicates if group has not been detected in the current measurement, but has been forced to exist (filtering)
     Point2m center;
+    meter_t radius;
     std::vector<AbsPoint*> points;
     Vec2<m_per_sec_t> speed;
 
     Group()
         : idx(INVALID_IDX)
         , forced(false) {}
+
+    static Group createFromPrev(const Group& prev, millisecond_t dt) {
+        Group result;
+        result.idx = prev.idx;
+        result.center = prev.center + prev.speed * dt;
+        result.radius = prev.radius;
+        result.forced = true;
+        result.speed = prev.speed;
+        return result;
+    }
 
     bool isMoving() const {
         return this->forced || std::count_if(this->points.begin(), this->points.end(), [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC_POS; }) >= 2;
@@ -166,6 +178,7 @@ nav_msgs::OccupancyGrid diffGrid;
 std::vector<DynamicObject> dynamicObjects;
 
 ros::Publisher *diffGridPub = nullptr;
+ros::Publisher *obstaclesPub = nullptr;
 
 int32_t maxGroupIdx = Group::INVALID_IDX;
 
@@ -253,6 +266,13 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr) {
                             it->center += p->absPos;
                         }
                         it->center /= it->points.size();
+
+                        for (AbsPoint *p : it->points) {
+                            const meter_t dist = p->absPos.distance(it->center);
+                            if (dist > it->radius) {
+                                it->radius = dist;
+                            }
+                        }
                     } else {
                         for (AbsPoint *p : it->points) {
                             p->state = AbsPoint::State::STATIC;
@@ -264,6 +284,36 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr) {
     }
 
     return groups;
+}
+
+void sendObstacles(const std::vector<Group>& groups) {
+    visualization_msgs::MarkerArray obstacles;
+
+    for (const Group& g : groups) {
+        if (g.isMoving()) {
+            visualization_msgs::Marker marker;
+            marker.header.frame_id = "base_link";
+            marker.header.stamp = ros::Time();
+            marker.ns = "bcr";
+            marker.id = g.idx;
+            marker.type = visualization_msgs::Marker::ARROW;
+            marker.action = visualization_msgs::Marker::ADD;
+
+            ROS_INFO("speed: %f, %f | angle: %f deg", g.speed.X.get(), g.speed.Y.get(), static_cast<degree_t>(Point2mps(m_per_sec_t(1.0f), speed_t::ZERO()).getAngle(g.speed)).get());
+            marker.pose = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(m_per_sec_t(1.0f), speed_t::ZERO()).getAngle(g.speed) });
+            marker.scale.x = 1 * g.speed.length().get();
+            marker.scale.y = 0.1;
+            marker.scale.z = 0.1;
+            marker.color.a = 1.0;
+            marker.color.r = 0.0;
+            marker.color.g = 1.0;
+            marker.color.b = 0.0;
+
+            obstacles.markers.push_back(marker);
+        }
+    }
+
+    obstaclesPub->publish(obstacles);
 }
 
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
@@ -392,6 +442,8 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         // finds moving objects 
         if (prevGroupsList.size() >= NUM_SPEED_FILTER) {
             const std::vector<Group>& prevGroups = prevGroupsList[prevGroupsList.size() - 1];
+            const millisecond_t prev_current_dt  = meas.time - prevScans[bcr::sub_underflow(prevScans.size() - 1, 1, prevScans.size())].time;
+            const millisecond_t speedFilter_dt   = meas.time - prevScans[bcr::sub_underflow(prevScans.size() - 1, NUM_SPEED_FILTER, prevScans.size())].time;
 
             for (Group& g : groups) {
                 if (g.isMoving()) {
@@ -399,7 +451,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                     meter_t minDist = centimeter_t(40);
                     for (const Group& prev : prevGroups) {
                         if (prev.isMoving()) {
-                            const meter_t dist = prev.center.distance(g.center);
+                            const meter_t dist = (prev.center + prev.speed * prev_current_dt).distance(g.center);
                             //ROS_INFO("dist: %f", dist.get());
                             if (dist < minDist) {
                                 minDist = dist;
@@ -425,18 +477,10 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                     }
 
                     if (!found) {
-                        Group g;
-                        g.idx = prev.idx;
-                        g.center = prev.center; // TODO + speed * dt
-                        g.forced = true;
-                        g.speed = prev.speed;
-                        groups.push_back(g);
+                        groups.push_back(Group::createFromPrev(prev, prev_current_dt));
                     }
                 }
-
             }
-
-            const millisecond_t speedFilter_dt = meas.time - prevScans[bcr::sub_underflow(prevScans.size() - 1, NUM_SPEED_FILTER, prevScans.size())].time;
 
             for (Group& g : groups) {
                 if (g.isMoving()) {
@@ -454,7 +498,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                     }
 
                     const char *forced = g.forced ? " (forced)" : "";
-                    ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } m/sec", g.idx, g.center.X.get(), g.center.Y.get(), forced, g.speed.X.get(), g.speed.Y.get());
+                    ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } (%f) m/s", g.idx, g.center.X.get(), g.center.Y.get(), forced, g.speed.X.get(), g.speed.Y.get(), g.speed.length().get());
                     for (const AbsPoint *p : g.points) {
                         //ROS_INFO("    group point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
                         diffGrid.data[p->gridPos.Y * diffGrid.info.width + p->gridPos.X] = 100;
@@ -471,6 +515,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         }
 
         prevGroupsList.append(groups);
+        sendObstacles(groups);
 
         //KMeans massCenters(meas.points);
         //uint32_t numObstacles = 5;  // TODO
@@ -495,6 +540,9 @@ int main(int argc, char **argv)
 
     ros::Publisher diffGridPublisher = node->advertise<nav_msgs::OccupancyGrid>("diff_grid", 10);
     diffGridPub = &diffGridPublisher;
+
+    ros::Publisher obstaclesPublisher = node->advertise<visualization_msgs::MarkerArray>("obstacles", 0);
+    obstaclesPub = &obstaclesPublisher;
 
     absMap.initialize(MAP_SIZE, MAP_RES);
 
