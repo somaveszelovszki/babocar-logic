@@ -167,7 +167,7 @@ meter_t getDistInDirection(const LaserMeas& meas, const Point2m& p) {
 }
 
 static constexpr uint32_t NUM_PREV_COMPARE = 5;
-static constexpr uint32_t NUM_SPEED_FILTER = 1;
+static constexpr uint32_t NUM_SPEED_FILTER = 5;
 
 ring_buffer<LaserMeas, NUM_PREV_COMPARE + 1> prevScans;
 ring_buffer<std::vector<Group>, NUM_PREV_COMPARE + 1> prevGroupsList;
@@ -182,12 +182,13 @@ ros::Publisher *obstaclesPub = nullptr;
 
 int32_t maxGroupIdx = Group::INVALID_IDX;
 
-std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr) {
+std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const std::vector<radian_t>& negDiffAngles) {
     std::vector<Group> groups;
 
     if (meas.points.size() >= 2) {
 
-        Group *currentGroup = nullptr;  // TODO use iterator
+        std::vector<Group>::iterator currentGroup = groups.end();
+
         const AbsPoint *p_prev = &meas.points[0];
         int32_t startIdx = 1;
         int32_t i = 1;
@@ -199,48 +200,78 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr) {
             // if point is far from its neighbour, we start a new group (new object)
             if (p.absPos.distance(p_prev->absPos) > eps) {
                 // saves index of the first point thas has already been added to a group
-                if (!currentGroup) {
+                if (currentGroup == groups.end()) {
                     startIdx = i;
                 } else {
-                    // std::vector<AbsPoint*>::iterator firstDynamic = std::find_if(
-                    //     currentGroup->points.begin(), currentGroup->points.end(),
-                    //     [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC; });
+                    std::vector<AbsPoint*>::iterator firstDynamic = std::find_if(
+                        currentGroup->points.begin(), currentGroup->points.end(),
+                        [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC_POS; });
+                    bool beginningStaticPoints = firstDynamic != currentGroup->points.end();
 
-                    // std::vector<AbsPoint*>::iterator firstStaticAfterLastDynamic = std::find_if(
-                    //     currentGroup->points.rbegin(), currentGroup->points.rend(),
-                    //     [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC; }).base();
-                    // bool trailingStaticPoints = firstStaticAfterLastDynamic != currentGroup->points.begin();
+                    std::vector<AbsPoint*>::iterator firstStaticAfterLastDynamic = std::find_if(
+                        currentGroup->points.rbegin(), currentGroup->points.rend(),
+                        [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC_POS; }).base();
+                    bool trailingStaticPoints = firstStaticAfterLastDynamic != currentGroup->points.begin();
 
-                    // // separates starting static points from middle dynamic points
-                    // // in order to prevent wall from being added to a moving object
-                    // Group before, after;
-                    // for (std::vector<AbsPoint*>::iterator it = currentGroup->points.begin(); it != firstDynamic; ) {
-                    //     before.points.push_back(*it);
-                    //     it = currentGroup->points.erase(it);
-                    //     --firstDynamic;
-                    //     --firstStaticAfterLastDynamic;
-                    // }
+                    Group before, after;
 
-                    // if (trailingStaticPoints) {
-                    //     // separates trailing static points from middle dynamic points
-                    //     // in order to prevent wall from being added to a moving object
-                    //     for (std::vector<AbsPoint*>::iterator it = firstStaticAfterLastDynamic; it != currentGroup->points.end(); ) {
-                    //         after.points.push_back(*it);
-                    //         it = currentGroup->points.erase(it);
-                    //     }
-                    // }
+                    static constexpr meter_t MAX_OBSTACLE_LENGTH_AFTER_DYNAMIC_POINT = meter_t(1.5f);
 
-                    // groups.push_back(before);   // TODO order should be before, current, after (now: current, before, after)
-                    // groups.push_back(after);
+                    if (beginningStaticPoints) {
+                        const meter_t distBeforeFirstDynamic = currentGroup->points[0]->absPos.distance((*firstDynamic)->absPos);
+                        if (distBeforeFirstDynamic > MAX_OBSTACLE_LENGTH_AFTER_DYNAMIC_POINT) {
+                            // separates starting static points from middle dynamic points
+                            // in order to prevent wall from being added to a moving object
+                            for (std::vector<AbsPoint*>::iterator it = currentGroup->points.begin(); it != firstDynamic; ) {
+                                before.points.push_back(*it);
+                                it = currentGroup->points.erase(it);
+                                --firstDynamic;
+                                --firstStaticAfterLastDynamic;
+                            }
+                        }
+                    }
+                    
+
+                    if (trailingStaticPoints) {
+                        const meter_t distAfterLastDynamic = currentGroup->points.back()->absPos.distance((*(firstStaticAfterLastDynamic - 1))->absPos);
+                        if (distAfterLastDynamic > MAX_OBSTACLE_LENGTH_AFTER_DYNAMIC_POINT) {
+                            // separates trailing static points from middle dynamic points
+                            // in order to prevent wall from being added to a moving object
+                            for (std::vector<AbsPoint*>::iterator it = firstStaticAfterLastDynamic; it != currentGroup->points.end(); ) {
+                                after.points.push_back(*it);
+                                it = currentGroup->points.erase(it);
+                            }
+                        }
+                    }
+
+                    groups.push_back(before);   // TODO order should be before, current, after (now: current, before, after)
+                    groups.push_back(after);
                 }
 
                 groups.push_back(Group());
+                currentGroup = groups.end() - 1;
+            } else {
+                // if (p.state != AbsPoint::State::DYNAMIC_POS) {
+                //     const radian_t prev_angle = meas.odom.pose.pos.getAngle(p_prev->absPos);
+                //     const radian_t angle = meas.odom.pose.pos.getAngle(p.absPos);
 
-                //ROS_INFO("new group");
-                currentGroup = &groups[groups.size() - 1];
+                //     bool found = false;
+                //     for (radian_t ang : negDiffAngles) {
+                //         if (bcr::isBtw(ang, angle, prev_angle)) {
+                //             found = true;
+                //             break;                        
+                //         }
+                //     }
+
+                //     if (found) {
+                //         ROS_INFO("forced new group");
+                //         groups.push_back(Group());
+                //         currentGroup = groups.end() - 1;
+                //     }
+                // }
             }
 
-            if (currentGroup) {
+            if (currentGroup != groups.end()) {
                 currentGroup->points.push_back(&p);
             }
 
@@ -298,8 +329,6 @@ void sendObstacles(const std::vector<Group>& groups) {
             marker.id = g.idx;
             marker.type = visualization_msgs::Marker::ARROW;
             marker.action = visualization_msgs::Marker::ADD;
-
-            ROS_INFO("speed: %f, %f | angle: %f deg", g.speed.X.get(), g.speed.Y.get(), static_cast<degree_t>(Point2mps(m_per_sec_t(1.0f), speed_t::ZERO()).getAngle(g.speed)).get());
             marker.pose = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(m_per_sec_t(1.0f), speed_t::ZERO()).getAngle(g.speed) });
             marker.scale.x = 1 * g.speed.length().get();
             marker.scale.y = 0.1;
@@ -308,16 +337,24 @@ void sendObstacles(const std::vector<Group>& groups) {
             marker.color.r = 0.0;
             marker.color.g = 1.0;
             marker.color.b = 0.0;
+            marker.lifetime = ros::Duration(0.5);
 
             obstacles.markers.push_back(marker);
         }
     }
 
+    diffGrid.info.width = diffGrid.info.height = MAP_SIZE / MAP_RES;
+    diffGrid.info.resolution = static_cast<meter_t>(MAP_RES).get();
+
     obstaclesPub->publish(obstacles);
 }
 
+int a = 0;
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
+    if (++a == 6) {
+        a = 6;
+    }
     prevScans.emplace_back(scan);
     LaserMeas& meas = prevScans[prevScans.size() - 1];
     //meas.odom = carOdom;
@@ -406,6 +443,45 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             }
         }
 
+        // finds negative dynamic points (that existed in the previous measurement but not in the current one)
+
+        std::vector<radian_t> negDiffAngles;
+        const LaserMeas& prevMeas = prevScans[bcr::sub_underflow(prevScans.size() - 1, NUM_PREV_COMPARE, prevScans.size())];
+
+        for (uint32_t i = 0; i < prevMeas.points.size(); ++i) {
+            const AbsPoint& p = prevMeas.points[i];
+
+             for (uint32_t s = 1; s <= NUM_PREV_COMPARE - 1; ++s) {
+                const LaserMeas& m = prevScans[bcr::sub_underflow(prevScans.size() - 1, s, prevScans.size())];
+
+                // checks if correspondent point can be found in the other previous measurements or the current measurement
+                // if yes, it means point is a static point
+                // if no, then dynamic
+
+                const meter_t eps = p.absPos.length() * scan->angle_increment / 4;
+
+                // if point is not found in one of the previous measurements or the current measurement, it may be a negative dynamic point
+                // but first checks if distance is smaller than the other distances, otherwise it is not a moving object that we have detected,
+                // but the wall behind an object that is moving away
+                if (std::find_if(m.points.begin(), m.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absPos.distance(prevPoint.absPos) < eps; }) == m.points.end()) {
+                    const meter_t dist = meter_t(prevMeas.scan->ranges[p.idx]);
+                    const radian_t other_angle = m.odom.pose.pos.getAngle(p.absPos);
+                    const meter_t other_dist = m.getDistance(other_angle);
+
+                    //ROS_INFO("possible diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
+
+                    if (other_dist < dist + centimeter_t(20)) {
+                        const radian_t current_angle = meas.odom.pose.pos.getAngle(p.absPos);
+                        negDiffAngles.push_back(current_angle);
+                        //ROS_INFO("negDiffAngle: %f deg", static_cast<degree_t>(current_angle).get());
+                        //diffGrid.data[p.gridPos.Y * diffGrid.info.width + p.gridPos.X] = 100;
+                    }
+
+                    break;
+                }
+            }
+        }
+
         // removes noise - only keeps dynamic points that have left and right dynamic neighbours in the scan's ranges
 
         //std::vector<AbsPoint*> filteredDiffPoints;
@@ -437,10 +513,10 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             }
         }
 
-        std::vector<Group> groups = makeGroups(meas, radian_t(scan->angle_increment));
+        std::vector<Group> groups = makeGroups(meas, radian_t(scan->angle_increment), negDiffAngles);
 
         // finds moving objects 
-        if (prevGroupsList.size() >= NUM_SPEED_FILTER) {
+        if (prevGroupsList.size() >= NUM_SPEED_FILTER + 1) {
             const std::vector<Group>& prevGroups = prevGroupsList[prevGroupsList.size() - 1];
             const millisecond_t prev_current_dt  = meas.time - prevScans[bcr::sub_underflow(prevScans.size() - 1, 1, prevScans.size())].time;
             const millisecond_t speedFilter_dt   = meas.time - prevScans[bcr::sub_underflow(prevScans.size() - 1, NUM_SPEED_FILTER, prevScans.size())].time;
@@ -500,7 +576,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                     const char *forced = g.forced ? " (forced)" : "";
                     ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } (%f) m/s", g.idx, g.center.X.get(), g.center.Y.get(), forced, g.speed.X.get(), g.speed.Y.get(), g.speed.length().get());
                     for (const AbsPoint *p : g.points) {
-                        //ROS_INFO("    group point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
+                        //ROS_INFO("group point: %d: (%d, %d)", p->idx, p->gridPos.X, p->gridPos.Y);
                         diffGrid.data[p->gridPos.Y * diffGrid.info.width + p->gridPos.X] = 100;
                     }
                 }
