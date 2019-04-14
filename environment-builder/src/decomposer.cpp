@@ -43,41 +43,8 @@ std::unique_ptr<DecomposerNode> node = nullptr;
 // TODO use tf
 
 Odometry carOdom;
-Pose lidarPose;
-
-Point2m rayDistToAbsPoint(radian_t angle, meter_t dist) {
-
-    geometry_msgs::PointStamped laser_point;
-    geometry_msgs::PointStamped base_point;
-
-    laser_point.header.frame_id = SCAN_TOPIC;
-    laser_point.header.stamp = ros::Time();
-    laser_point.point.x = dist.get() * bcr::cos(angle);
-    laser_point.point.y = dist.get() * bcr::sin(angle);
-    laser_point.point.z = 0.0;
-    
-    // try{
-    //     node->lidarTransformListener.transformPoint("base_link", laser_point, base_point);
-    //     ROS_INFO("lidar_scan: (%.2f, %.2f. %.2f) -----> base_link: (%.2f, %.2f, %.2f) at time %.2f",
-    //         laser_point.point.x, laser_point.point.y, laser_point.point.z,
-    //         base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());
-    // }
-    // catch(tf::TransformException& ex){
-    //     ROS_ERROR("Received an exception trying to transform a point from \"lidar_scan\" to \"base_link\": %s", ex.what());
-    // }
-
-    // TODO use previous odometry
-    // TODO remove this line:
-    base_point = laser_point;
-
-    return { meter_t(base_point.point.x), meter_t(base_point.point.y) };
-
-    //return { carOdom.pose.X + bcr::cos(carOdom.pose.angle + angle) * dist, carOdom.pose.Y + bcr::sin(carOdom.pose.angle + angle) * dist };
-}
 
 static constexpr uint32_t MAX_SCAN_SAMPLES = 400;
-
-} // namespace
 
 AbsoluteMap absMap;
 
@@ -113,11 +80,10 @@ struct LaserMeas {
     meter_t getDistance(radian_t angle) const {
         meter_t dist;
 
-        // TODO use current odom as offset
         if (angle.get() < this->scan->angle_min || angle.get() > this->scan->angle_max) {
             dist = distance_t::ZERO();
         } else {
-            int32_t idx = bcr::round((angle.get() - this->scan->angle_min) / this->scan->angle_increment);
+            int32_t idx = static_cast<int32_t>((angle.get() - this->scan->angle_min) / this->scan->angle_increment);    // floor of index
             while (idx < 0) {
                 idx += this->count;
             }
@@ -136,7 +102,7 @@ struct LaserMeas {
 struct Group {
     static constexpr int32_t INVALID_IDX = -1;
     int32_t idx;
-    bool forced;    // indicates if group has not been detected in the current measurement, but has been forced to exist (filtering)
+    uint32_t forcedCntr;    // indicates if group has not been detected in the current measurement, but has been forced to exist (filtering)
     Point2m center;
     meter_t radius;
     std::vector<AbsPoint*> points;
@@ -144,27 +110,23 @@ struct Group {
 
     Group()
         : idx(INVALID_IDX)
-        , forced(false) {}
+        , forcedCntr(0) {}
 
     static Group createFromPrev(const Group& prev, millisecond_t dt) {
         Group result;
         result.idx = prev.idx;
         result.center = prev.center + prev.speed * dt;
         result.radius = prev.radius;
-        result.forced = true;
+        result.forcedCntr = prev.forcedCntr + 1;
         result.speed = prev.speed;
         return result;
     }
 
     bool isMoving() const {
-        return this->forced || std::count_if(this->points.begin(), this->points.end(), [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC_POS; }) >= 2;
+        return this->forcedCntr > 0 ||
+            std::count_if(this->points.begin(), this->points.end(), [](const AbsPoint *p) { return p->state == AbsPoint::State::DYNAMIC_POS; }) >= 2;
     }
 };
-
-meter_t getDistInDirection(const LaserMeas& meas, const Point2m& p) {
-    const radian_t angle = meas.odom.pose.pos.getAngle(p);
-    return meas.getDistance(angle);
-}
 
 static constexpr uint32_t NUM_PREV_COMPARE = 5;
 static constexpr uint32_t NUM_SPEED_FILTER = 5;
@@ -181,6 +143,43 @@ ros::Publisher *diffGridPub = nullptr;
 ros::Publisher *obstaclesPub = nullptr;
 
 int32_t maxGroupIdx = Group::INVALID_IDX;
+
+Point2m rayDistToAbsPoint(const LaserMeas& meas, radian_t angle, meter_t dist) {
+
+    // geometry_msgs::PointStamped laser_point;
+    // geometry_msgs::PointStamped base_point;
+
+    // laser_point.header.frame_id = "scanner";
+    // laser_point.header.stamp = ros::Time();
+    // laser_point.point.x = dist.get() * bcr::cos(angle);
+    // laser_point.point.y = dist.get() * bcr::sin(angle);
+    // laser_point.point.z = 0.0;
+    
+    // try{
+    //     node->lidarTransformListener.transformPoint("odom", laser_point, base_point);
+    //     //ROS_INFO("scanner: (%.2f, %.2f. %.2f) -----> odom: (%.2f, %.2f, %.2f) at time %.2f",
+    //     //     laser_point.point.x, laser_point.point.y, laser_point.point.z,
+    //     //     base_point.point.x, base_point.point.y, base_point.point.z, base_point.header.stamp.toSec());
+    // }
+    // catch(tf::TransformException& ex){
+    //     ROS_ERROR("Received an exception trying to transform a point from \"scanner\" to \"odom\": %s", ex.what());
+    // }
+
+    // base_point = laser_point;
+
+    const radian_t abs_angle = meas.odom.pose.angle + angle;
+    return {
+        meas.odom.pose.pos.X + bcr::cos(abs_angle) * dist,
+        meas.odom.pose.pos.X + bcr::sin(abs_angle) * dist
+    };
+
+    //return { carOdom.pose.pos.X + bcr::cos(carOdom.pose.angle + angle) * dist, carOdom.pose.pos.Y + bcr::sin(carOdom.pose.angle + angle) * dist };
+}
+
+meter_t getDistInDirection(const LaserMeas& meas, const Point2m& p) {
+    const radian_t angle = meas.odom.pose.pos.getAngle(p) - meas.odom.pose.angle;
+    return meas.getDistance(angle);
+}
 
 std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const std::vector<radian_t>& negDiffAngles) {
     std::vector<Group> groups;
@@ -323,13 +322,13 @@ void sendObstacles(const std::vector<Group>& groups) {
     for (const Group& g : groups) {
         if (g.isMoving()) {
             visualization_msgs::Marker marker;
-            marker.header.frame_id = "base_link";
+            marker.header.frame_id = "odom";
             marker.header.stamp = ros::Time();
             marker.ns = "bcr";
             marker.id = g.idx;
             marker.type = visualization_msgs::Marker::ARROW;
             marker.action = visualization_msgs::Marker::ADD;
-            marker.pose = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(m_per_sec_t(1.0f), speed_t::ZERO()).getAngle(g.speed) });
+            marker.pose = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(speed_t::ZERO(), speed_t::ZERO()).getAngle(g.speed) });
             marker.scale.x = 1 * g.speed.length().get();
             marker.scale.y = 0.1;
             marker.scale.z = 0.1;
@@ -349,17 +348,11 @@ void sendObstacles(const std::vector<Group>& groups) {
     obstaclesPub->publish(obstacles);
 }
 
-int a = 0;
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
-    if (++a == 6) {
-        a = 6;
-    }
     prevScans.emplace_back(scan);
     LaserMeas& meas = prevScans[prevScans.size() - 1];
-    //meas.odom = carOdom;
-    meas.odom = bcr::Odometry();    // TODO carOdom
-
+    meas.odom = carOdom;
     staticScan = *scan;
 
     const double theta = 0.0;
@@ -397,10 +390,10 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 
         // filters out too near objects (false detection)
         if (dist > centimeter_t(10) && !std::isinf(dist.get())) {
-            const Point2m absPoint = rayDistToAbsPoint(angle, dist);
+            const Point2m absPoint = rayDistToAbsPoint(meas, angle, dist);
             //meas.points.push_back(absPoint);
             const Point2i absMapPoint = absMap.getNearestIndexes(absPoint);
-            meas.points.push_back({ i, absPoint, absMapPoint, AbsPoint::State::UNKNOWN });            
+            meas.points.push_back({ i, absPoint, absMapPoint, AbsPoint::State::UNKNOWN });
             //absMap.set(absMapPoint, AbsoluteMap::CellState::OCCUPIED);
         }
     }
@@ -413,6 +406,8 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 
         for (uint32_t i = 0; i < meas.points.size(); ++i) {
             AbsPoint& p = meas.points[i];
+            const meter_t cur_dist = meter_t(scan->ranges[p.idx]);
+            const meter_t eps = cur_dist * scan->angle_increment;
 
             for (uint32_t s = 1; s <= NUM_PREV_COMPARE; ++s) {
                 const LaserMeas& prev = prevScans[bcr::sub_underflow(prevScans.size() - 1, s, prevScans.size())];
@@ -421,27 +416,29 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                 // if yes, it means point is a static point
                 // if no, then dynamic
 
-                const meter_t eps = p.absPos.length() * scan->angle_increment / 4;
 
                 // if point is not found in one of the previous measurements, it may be a dynamic point
                 // but first checks if current distance is smaller than the previous, otherwise it is not a moving object that we have detected,
                 // but the wall behind an object that is moving away
                 if (std::find_if(prev.points.begin(), prev.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absPos.distance(prevPoint.absPos) < eps; }) == prev.points.end()) {
-                    const meter_t cur_dist = meter_t(scan->ranges[p.idx]);
                     const meter_t prev_dist = getDistInDirection(prev, p.absPos);
+                    //const radian_t prev_angle = prev.odom.pose.pos.getAngle(p.absPos) - prev.odom.pose.angle;
+                    //const meter_t prev_dist = prev.getDistance(prev_angle);
+                    //const Point2m prevAbsPoint = rayDistToAbsPoint(prev, prev_angle, prev_dist);
 
-                    //ROS_INFO("possible diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
-
-                    if (cur_dist < prev_dist + centimeter_t(20)) {
+                    if (cur_dist < prev_dist + centimeter_t(50)) {
                         p.state = AbsPoint::State::DYNAMIC_POS;
                         diffPoints.push_back(&p);
+                        //ROS_INFO("odom: %f, %f, angle: %f", meas.odom.pose.pos.X.get(), meas.odom.pose.pos.Y.get(), meas.odom.pose.angle.get());
+                        //ROS_INFO("prev odom: %f, %f, angle: %f", prev.odom.pose.pos.X.get(), prev.odom.pose.pos.Y.get(), prev.odom.pose.angle.get());
+                        //ROS_INFO("diff point: (%f, %f) - dist: %f, prev: (%f, %f) - dist: %f", p.absPos.X.get(), p.absPos.Y.get(), cur_dist.get(), prevAbsPoint.X.get(), prevAbsPoint.Y.get(), prev_dist.get());
                         //diffGrid.data[p.gridPos.Y * diffGrid.info.width + p.gridPos.X] = 100;
+                        break;
                     }
-
-                    break;
                 }
             }
         }
+        
 
         // finds negative dynamic points (that existed in the previous measurement but not in the current one)
 
@@ -465,8 +462,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                 // but the wall behind an object that is moving away
                 if (std::find_if(m.points.begin(), m.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absPos.distance(prevPoint.absPos) < eps; }) == m.points.end()) {
                     const meter_t dist = meter_t(prevMeas.scan->ranges[p.idx]);
-                    const radian_t other_angle = m.odom.pose.pos.getAngle(p.absPos);
-                    const meter_t other_dist = m.getDistance(other_angle);
+                    const meter_t other_dist = getDistInDirection(m, p.absPos);
 
                     //ROS_INFO("possible diff point: %d: (%d, %d)", p.idx, p.gridPos.X, p.gridPos.Y);
 
@@ -542,8 +538,10 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                 }
             }
 
+            static constexpr uint32_t MAX_GROUP_FORCE_APPEAR_COUNT = 3;
+
             for (const Group& prev : prevGroups) {
-                if (!prev.forced && prev.isMoving()) {
+                if (prev.forcedCntr < MAX_GROUP_FORCE_APPEAR_COUNT && prev.isMoving()) {
                     bool found = false;
                     for (const Group& g : groups) {
                         if (prev.idx == g.idx) {
@@ -573,8 +571,8 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                         g.speed = { (g.center.X - it->center.X) / speedFilter_dt, (g.center.Y - it->center.Y) / speedFilter_dt };
                     }
 
-                    const char *forced = g.forced ? " (forced)" : "";
-                    ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } (%f) m/s", g.idx, g.center.X.get(), g.center.Y.get(), forced, g.speed.X.get(), g.speed.Y.get(), g.speed.length().get());
+                    const std::string forced = g.forcedCntr > 0 ? " (forced: " + std::to_string(g.forcedCntr) + ")" : "";
+                    ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } (%f) m/s", g.idx, g.center.X.get(), g.center.Y.get(), forced.c_str(), g.speed.X.get(), g.speed.Y.get(), g.speed.length().get());
                     for (const AbsPoint *p : g.points) {
                         //ROS_INFO("group point: %d: (%d, %d)", p->idx, p->gridPos.X, p->gridPos.Y);
                         diffGrid.data[p->gridPos.Y * diffGrid.info.width + p->gridPos.X] = 100;
@@ -603,8 +601,10 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 
 void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
     carOdom = bcr::ros_convert(*odom);
-    //ROS_INFO("Car pos: [%f, %f] m, orientation: %f deg", static_cast<meter_t>(carOdom.pose.X).get(), static_cast<meter_t>(carOdom.pose.Y).get(), static_cast<radian_t>(carOdom.pose.angle).get());
+    //ROS_INFO("Car pos: [%f, %f] m, orientation: %f deg", static_cast<meter_t>(carOdom.pose.pos.X).get(), static_cast<meter_t>(carOdom.pose.pos.Y).get(), static_cast<radian_t>(carOdom.pose.angle).get());
 }
+
+} // namespace
 
 int main(int argc, char **argv)
 {
