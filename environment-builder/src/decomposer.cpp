@@ -140,6 +140,7 @@ nav_msgs::OccupancyGrid diffGrid;
 std::vector<DynamicObject> dynamicObjects;
 
 ros::Publisher *diffGridPub = nullptr;
+ros::Publisher *staticScanPub = nullptr;
 ros::Publisher *obstaclesPub = nullptr;
 
 int32_t maxGroupIdx = Group::INVALID_IDX;
@@ -591,6 +592,17 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         prevGroupsList.append(groups);
         sendObstacles(groups);
 
+        // removes dynamic points from the static scan
+        for (const Group& g : groups) {
+            if (g.isMoving()) {
+                for (const AbsPoint *p : g.points) {
+                    staticScan.ranges[p->idx] = std::numeric_limits<float32_t>::infinity();
+                }
+            }
+        }
+
+        staticScanPub->publish(staticScan);
+
         //KMeans massCenters(meas.points);
         //uint32_t numObstacles = 5;  // TODO
         //const std::vector<KMeans::Group> groups = massCenters.run(numObstacles);
@@ -616,6 +628,9 @@ int main(int argc, char **argv)
 
     ros::Publisher diffGridPublisher = node->advertise<nav_msgs::OccupancyGrid>("diff_grid", 10);
     diffGridPub = &diffGridPublisher;
+
+    ros::Publisher staticScanPublisher = node->advertise<sensor_msgs::LaserScan>("static_scan", 10);
+    staticScanPub = &staticScanPublisher;
 
     ros::Publisher obstaclesPublisher = node->advertise<visualization_msgs::MarkerArray>("obstacles", 0);
     obstaclesPub = &obstaclesPublisher;
