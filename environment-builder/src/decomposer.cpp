@@ -42,6 +42,7 @@ std::unique_ptr<DecomposerNode> node = nullptr;
 
 // TODO use tf
 
+nav_msgs::Odometry carOdom_ros;
 Odometry carOdom;
 
 static constexpr uint32_t MAX_SCAN_SAMPLES = 400;
@@ -140,6 +141,7 @@ nav_msgs::OccupancyGrid diffGrid;
 std::vector<DynamicObject> dynamicObjects;
 
 ros::Publisher *diffGridPub = nullptr;
+ros::Publisher *staticGridPub = nullptr;
 ros::Publisher *staticScanPub = nullptr;
 ros::Publisher *obstaclesPub = nullptr;
 
@@ -366,6 +368,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     q.setRPY(0.0, 0.0, theta);
     transform.setRotation(q);
     br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "odom", "diff_grid"));
+    br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), "odom", "static_grid"));
     
     diffGrid.header.frame_id = "diff_grid";
     diffGrid.header.stamp = scan->header.stamp;
@@ -373,15 +376,31 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     diffGrid.info.width = diffGrid.info.height = MAP_SIZE / MAP_RES;
     diffGrid.info.resolution = static_cast<meter_t>(MAP_RES).get();
 
-    diffGrid.info.origin.position.x = 0.0;
-    diffGrid.info.origin.position.y = 0.0;
-    diffGrid.info.origin.position.z = 0.0;
+    diffGrid.info.origin.position.x = 0;
+    diffGrid.info.origin.position.y = 0;
+    diffGrid.info.origin.position.z = 0;
     tf::quaternionTFToMsg(q, diffGrid.info.origin.orientation);
 
     diffGrid.info.map_load_time = diffGrid.header.stamp;
 
     diffGrid.data.resize(diffGrid.info.width * diffGrid.info.height);
     std::fill(diffGrid.data.begin(), diffGrid.data.end(), 0);
+
+    absMap.grid.header.frame_id = "static_grid";
+    absMap.grid.header.stamp = scan->header.stamp;
+
+    absMap.grid.info.width = absMap.grid.info.height = MAP_SIZE / MAP_RES;
+    absMap.grid.info.resolution = static_cast<meter_t>(MAP_RES).get();
+
+    absMap.grid.info.origin.position.x = 0;
+    absMap.grid.info.origin.position.y = 0;
+    absMap.grid.info.origin.position.z = 0;
+    tf::quaternionTFToMsg(q, absMap.grid.info.origin.orientation);
+
+    absMap.grid.info.map_load_time = absMap.grid.header.stamp;
+
+    absMap.grid.data.resize(absMap.grid.info.width * absMap.grid.info.height);
+    std::fill(absMap.grid.data.begin(), absMap.grid.data.end(), 0);
 
     ROS_INFO("------------------------------------------------");
 
@@ -590,28 +609,30 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         }
 
         prevGroupsList.append(groups);
-        sendObstacles(groups);
 
-        // removes dynamic points from the static scan
-        for (const Group& g : groups) {
-            if (g.isMoving()) {
-                for (const AbsPoint *p : g.points) {
-                    staticScan.ranges[p->idx] = std::numeric_limits<float32_t>::infinity();
-                }
+        // removes dynamic points from the static scan and adds static points to the absolute map
+
+        for (const AbsPoint& p : meas.points) {
+            if (p.state == AbsPoint::State::DYNAMIC_POS) {
+                staticScan.ranges[p.idx] = std::numeric_limits<float32_t>::infinity();
+            } else if (p.state == AbsPoint::State::STATIC) {
+                absMap.setRay(meas.odom.pose.pos, p.absPos);
             }
         }
 
+        sendObstacles(groups);
+        diffGridPub->publish(diffGrid);
+        staticGridPub->publish(absMap.grid);
         staticScanPub->publish(staticScan);
 
         //KMeans massCenters(meas.points);
         //uint32_t numObstacles = 5;  // TODO
         //const std::vector<KMeans::Group> groups = massCenters.run(numObstacles);
     }
-
-    diffGridPub->publish(diffGrid);
 }
 
 void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
+    carOdom_ros = *odom;
     carOdom = bcr::ros_convert(*odom);
     //ROS_INFO("Car pos: [%f, %f] m, orientation: %f deg", static_cast<meter_t>(carOdom.pose.pos.X).get(), static_cast<meter_t>(carOdom.pose.pos.Y).get(), static_cast<radian_t>(carOdom.pose.angle).get());
 }
@@ -628,6 +649,9 @@ int main(int argc, char **argv)
 
     ros::Publisher diffGridPublisher = node->advertise<nav_msgs::OccupancyGrid>("diff_grid", 10);
     diffGridPub = &diffGridPublisher;
+
+    ros::Publisher staticGridPublisher = node->advertise<nav_msgs::OccupancyGrid>("static_grid", 10);
+    staticGridPub = &staticGridPublisher;
 
     ros::Publisher staticScanPublisher = node->advertise<sensor_msgs::LaserScan>("static_scan", 10);
     staticScanPub = &staticScanPublisher;

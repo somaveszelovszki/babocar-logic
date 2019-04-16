@@ -25,6 +25,7 @@ AbsoluteMap::CellState AbsoluteMap::get(int32_t x, int32_t y) const {
 
 void AbsoluteMap::set(const Point2i& pos, CellState state) {
     this->cells.at(pos.Y * this->row_size_ + pos.X) = state;
+    this->grid.data.at(pos.Y * this->row_size_ + pos.X) = state == CellState::OCCUPIED ? 100 : state == CellState::FREE ? 0 : 50;
 }
 
 AbsoluteMap::CellState AbsoluteMap::getNearest(const Point2m& point) const {
@@ -36,45 +37,61 @@ void AbsoluteMap::setNearest(const Point2m& point, AbsoluteMap::CellState state)
 }
 
 void AbsoluteMap::setRay(const Point2m& center, const Point2m& rayEnd) {
+
     const Point2i centerPos = this->getNearestIndexes(center);
-    const Point2f rayEndPos = static_cast<Point2f>(this->getNearestIndexes(rayEnd));
-    const float32_t rayLength = centerPos.distance(rayEndPos);
+    const Point2i rayEndPos = this->getNearestIndexes(rayEnd);
+    const radian_t angle = center.getAngle(rayEnd);
+    const meter_t stepLen = this->resolution_;
+
+    const meter_t dx = bcr::cos(angle) * stepLen, dy = bcr::sin(angle) * stepLen;
+    uint32_t numSteps = (rayEnd - center).length() / stepLen;
+
     this->set(rayEndPos, CellState::OCCUPIED);
+    Point2i prevPos = centerPos;
+    Point2m current = center;
 
-    Point2i pos = centerPos;
-    Point2i prevPos = pos;
+    uint32_t i = 0;
+    do {
+        const Point2i mapPos = this->getNearestIndexes(current);
+        this->set(mapPos, CellState::FREE);
 
-    // finds closest cells to the line connecting the car and the measured point marks them as FREE
-    const Line2f line(centerPos, rayEndPos);
+        current.X += dx;
+        current.Y += dy;
 
-    while(pos != rayEndPos) {
-        this->set(pos, CellState::FREE);
+        prevPos = mapPos;
+    } while (prevPos != rayEndPos && ++i < numSteps);
 
-        // finds neighbour closest to the line, that will be the next cell
-        const std::array<Point2i, 4> neighbours = {
-            Point2i(pos.X - 1, pos.Y),
-            Point2i(pos.X + 1, pos.Y),
-            Point2i(pos.X, pos.Y - 1),
-            Point2i(pos.X, pos.Y + 1)
-        };
+    // // finds closest cells to the line connecting the car and the measured point marks them as FREE
+    // const Line2f line(centerPos, rayEndPos);
 
-        float32_t min_dist = std::numeric_limits<float32_t>::max();
-        const Point2i *nextPos = nullptr;
+    // while(pos != rayEndPos) {
+    //     this->set(pos, CellState::FREE);
 
-        std::for_each(neighbours.begin(), neighbours.end(), [&](const Point2i& p) {
-            if (p != prevPos) {
-                const Point2f pf = static_cast<Point2f>(p);
-                const float32_t dist = bcr::distance(line, pf);
-                if (dist < min_dist && (pos != centerPos || pf.distance(rayEndPos) < rayLength)) {
-                    min_dist = dist;
-                    nextPos = &p;
-                }
-            }
-        });
+    //     // finds neighbour closest to the line, that will be the next cell
+    //     const std::array<Point2i, 4> neighbours = {
+    //         Point2i(pos.X - 1, pos.Y),
+    //         Point2i(pos.X + 1, pos.Y),
+    //         Point2i(pos.X, pos.Y - 1),
+    //         Point2i(pos.X, pos.Y + 1)
+    //     };
 
-        prevPos = pos;
-        pos = *nextPos;
-    }
+    //     float32_t min_dist = std::numeric_limits<float32_t>::max();
+    //     const Point2i *nextPos = nullptr;
+
+    //     std::for_each(neighbours.begin(), neighbours.end(), [&](const Point2i& p) {
+    //         if (p != prevPos) {
+    //             const Point2f pf = static_cast<Point2f>(p);
+    //             const float32_t dist = bcr::distance(line, pf);
+    //             if (dist < min_dist && (pos != centerPos || pf.distance(rayEndPos) < rayLength)) {
+    //                 min_dist = dist;
+    //                 nextPos = &p;
+    //             }
+    //         }
+    //     });
+
+    //     prevPos = pos;
+    //     pos = *nextPos;
+    // }
 }
 
 Point2i AbsoluteMap::getNearestIndexes(const Point2m& point) const {

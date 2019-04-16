@@ -6,6 +6,8 @@
 
 #include <vector>
 
+#include <nav_msgs/OccupancyGrid.h>
+
 namespace bcr {
 
 class AbsoluteMap
@@ -36,6 +38,8 @@ public:
     bool isInside(const Point2m& point) const;
 
     uint32_t numObstacleNeighbours(const Point2i& point, uint32_t delta) const;
+
+    nav_msgs::OccupancyGrid grid;   // TODO use only one implementation (this or own)
 
 private:
     Point2i center;
