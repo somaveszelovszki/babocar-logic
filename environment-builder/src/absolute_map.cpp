@@ -13,6 +13,7 @@ void AbsoluteMap::initialize(meter_t _size, meter_t _resolution) {
 
     this->center = { this->row_size_ / 2, this->row_size_ / 2 };
     this->cells.resize(this->row_size_ * this->row_size_, CellState::UNKNOWN);
+    this->grid.data.resize(this->row_size_ * this->row_size_, 50);
 }
 
 AbsoluteMap::CellState AbsoluteMap::get(const Point2i& pos) const {
@@ -60,44 +61,44 @@ void AbsoluteMap::setRay(const Point2m& center, const Point2m& rayEnd) {
 
         prevPos = mapPos;
     } while (prevPos != rayEndPos && ++i < numSteps);
+}
 
-    // // finds closest cells to the line connecting the car and the measured point marks them as FREE
-    // const Line2f line(centerPos, rayEndPos);
+void AbsoluteMap::setRay(const Point2m& center, radian_t angle) {
 
-    // while(pos != rayEndPos) {
-    //     this->set(pos, CellState::FREE);
+    const Point2i centerPos = this->getNearestIndexes(center);
+    const meter_t stepLen = this->resolution_;
 
-    //     // finds neighbour closest to the line, that will be the next cell
-    //     const std::array<Point2i, 4> neighbours = {
-    //         Point2i(pos.X - 1, pos.Y),
-    //         Point2i(pos.X + 1, pos.Y),
-    //         Point2i(pos.X, pos.Y - 1),
-    //         Point2i(pos.X, pos.Y + 1)
-    //     };
+    const meter_t dx = bcr::cos(angle) * stepLen, dy = bcr::sin(angle) * stepLen;
 
-    //     float32_t min_dist = std::numeric_limits<float32_t>::max();
-    //     const Point2i *nextPos = nullptr;
+    Point2i prevPos = centerPos;
+    Point2m current = center;
 
-    //     std::for_each(neighbours.begin(), neighbours.end(), [&](const Point2i& p) {
-    //         if (p != prevPos) {
-    //             const Point2f pf = static_cast<Point2f>(p);
-    //             const float32_t dist = bcr::distance(line, pf);
-    //             if (dist < min_dist && (pos != centerPos || pf.distance(rayEndPos) < rayLength)) {
-    //                 min_dist = dist;
-    //                 nextPos = &p;
-    //             }
-    //         }
-    //     });
+    uint32_t i = 0;
+    do {
+        if (!this->isInside(current)) {
+            break;
+        }
 
-    //     prevPos = pos;
-    //     pos = *nextPos;
-    // }
+        const Point2i mapPos = this->getNearestIndexes(current);
+        this->set(mapPos, CellState::FREE);
+
+        current.X += dx;
+        current.Y += dy;
+
+        prevPos = mapPos;
+    } while (true);
 }
 
 Point2i AbsoluteMap::getNearestIndexes(const Point2m& point) const {
+
+    const float32_t rateX = bcr::abs(point.X / (this->size_ / 2));
+    const float32_t rateY = bcr::abs(point.Y / (this->size_ / 2));
+
+    const Point2m insidePoint = point / bcr::max(1.0f, bcr::max(rateX, rateY));
+
     return { 
-        bcr::clamp(this->center.X + bcr::round(point.X / this->resolution_), 0, this->row_size_ - 1),
-        bcr::clamp(this->center.Y + bcr::round(point.Y / this->resolution_), 0, this->row_size_ - 1)
+        bcr::clamp(this->center.X + bcr::round(insidePoint.X / this->resolution_), 0, this->row_size_ - 1),
+        bcr::clamp(this->center.Y + bcr::round(insidePoint.Y / this->resolution_), 0, this->row_size_ - 1)
     };
 }
 

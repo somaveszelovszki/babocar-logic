@@ -33,6 +33,8 @@ public:
 
     void setRay(const Point2m& center, const Point2m& rayEnd);
 
+    void setRay(const Point2m& center, radian_t angle);
+
     Point2i getNearestIndexes(const Point2m& point) const;
 
     bool isInside(const Point2m& point) const;
