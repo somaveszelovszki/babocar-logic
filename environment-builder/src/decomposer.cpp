@@ -237,7 +237,7 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
 
                     Group before, after;
 
-                    static constexpr meter_t MAX_OBSTACLE_LENGTH_AFTER_DYNAMIC_POINT = meter_t(1.5f);
+                    static constexpr meter_t MAX_OBSTACLE_LENGTH_AFTER_DYNAMIC_POINT = meter_t(1.0f);
 
                     if (beginningStaticPoints) {
                         const meter_t distBeforeFirstDynamic = currentGroup->points[0]->absOdomPos.distance((*firstDynamic)->absOdomPos);
@@ -373,6 +373,7 @@ void sendObstacles(const std::vector<Group>& groups) {
 
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
+    ROS_INFO("New scan");
     prevScans.emplace_back(scan);
     LaserMeas& meas = prevScans[prevScans.size() - 1];
     meas.odom = carOdom;
@@ -447,7 +448,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         for (uint32_t i = 0; i < meas.points.size(); ++i) {
             AbsPoint& p = meas.points[i];
             const meter_t cur_dist = meter_t(scan->ranges[p.idx]);
-            const meter_t eps = cur_dist * scan->angle_increment;
+            const meter_t eps = cur_dist * scan->angle_increment * 2;
 
             for (uint32_t s = 1; s <= NUM_PREV_COMPARE; ++s) {
                 const LaserMeas& prev = prevScans[bcr::sub_underflow(prevScans.size() - 1, s, prevScans.size())];
@@ -550,6 +551,8 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         }
 
         std::vector<Group> groups = makeGroups(meas, radian_t(scan->angle_increment), negDiffAngles);
+        std::vector<Group> filteredGroups;
+        filteredGroups.reserve(groups.size());
 
         // finds moving objects 
         if (prevGroupsList.size() >= NUM_SPEED_FILTER + 1) {
@@ -609,13 +612,25 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 
                     if (it != prevGroups.end()) {
                         g.speed = { (g.center.X - it->center.X) / speedFilter_dt, (g.center.Y - it->center.Y) / speedFilter_dt };
+                        ROS_INFO("Group #%d: (%f - %f) m / %f ms = %f m/s", g.idx, g.center.X.get(), g.center.Y.get(), speedFilter_dt.get(), g.speed.length().get());
+                        //ROS_INFO("sp: %f", g.speed.length().get());
+                    } else {
+                        g.speed = { speed_t::ZERO(), speed_t::ZERO() };
                     }
+                }
+            }
 
-                    const std::string forced = g.forcedCntr > 0 ? " (forced: " + std::to_string(g.forcedCntr) + ")" : "";
-                    ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } (%f) m/s", g.idx, g.center.X.get(), g.center.Y.get(), forced.c_str(), g.speed.X.get(), g.speed.Y.get(), g.speed.length().get());
-                    for (const AbsPoint *p : g.points) {
-                        //ROS_INFO("group point: %d: (%d, %d)", p->idx, p->mapGridPos.X, p->mapGridPos.Y);
-                        diffGrid.data[p->mapGridPos.Y * diffGrid.info.width + p->mapGridPos.X] = 100;
+            for (Group& g : groups) {
+                if (g.isMoving()) {
+                    const m_per_sec_t speed = g.speed.length();
+                    if (bcr::abs(speed) > m_per_sec_t(0.05f) && !bcr::isinf(speed)) {
+                        filteredGroups.push_back(g);
+                        const std::string forced = g.forcedCntr > 0 ? " (forced: " + std::to_string(g.forcedCntr) + ")" : "";
+                        //ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } (%f) m/s", g.idx, g.center.X.get(), g.center.Y.get(), forced.c_str(), g.speed.X.get(), g.speed.Y.get(), g.speed.length().get());
+                        for (const AbsPoint *p : g.points) {
+                            //ROS_INFO("group point: %d: (%d, %d)", p->idx, p->mapGridPos.X, p->mapGridPos.Y);
+                            diffGrid.data[p->mapGridPos.Y * diffGrid.info.width + p->mapGridPos.X] = 100;
+                        }
                     }
                 }
             }
@@ -626,6 +641,8 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                     g.idx = ++maxGroupIdx;
                 }
             }
+
+            filteredGroups = groups;
         }
 
         prevGroupsList.append(groups);
@@ -641,7 +658,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             }
         }
 
-        sendObstacles(groups);
+        sendObstacles(filteredGroups);
         diffGridPub->publish(diffGrid);
         staticGridPub->publish(absMap.grid);
         staticScanPub->publish(staticScan);
