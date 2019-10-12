@@ -49,6 +49,54 @@ Odometry carOdom;
 
 static constexpr uint32_t MAX_SCAN_SAMPLES = 400;
 
+Pose transformPose(const std::string& from_frame, const std::string& to_frame, const Pose& p, const ros::Time& time = ros::Time()) {
+
+    geometry_msgs::PoseStamped from_pose;
+    geometry_msgs::PoseStamped to_pose;
+
+    from_pose.header.frame_id = from_frame;
+    from_pose.header.stamp = time;
+    from_pose.pose = bcr::ros_convert(p);
+
+    try{
+        node->transformListener.transformPose(to_frame, from_pose, to_pose);
+        //ROS_INFO("scanner: (%.2f, %.2f. %.2f) -----> %s: (%.2f, %.2f, %.2f) at time %.2f",
+        //     to_frame.c_str(),
+        //     from_pose.point.x, from_pose.point.y, from_pose.point.z,
+        //     to_pose.point.x, to_pose.point.y, to_pose.point.z, to_pose.header.stamp.toSec());
+    }
+    catch(tf::TransformException& ex){
+        ROS_ERROR("Received an exception trying to transform a pose from \"%s\" to \"%s\": %s", from_frame.c_str(), to_frame.c_str(), ex.what());
+    }
+
+    return bcr::ros_convert(to_pose.pose);
+}
+
+Point2m transformPoint(const std::string& from_frame, const std::string& to_frame, const Point2m& p, const ros::Time time = ros::Time()) {
+
+    geometry_msgs::PointStamped from_point;
+    geometry_msgs::PointStamped to_point;
+
+    from_point.header.frame_id = from_frame;
+    from_point.header.stamp = time;
+    from_point.point.x = p.X.get();
+    from_point.point.y = p.Y.get();
+    from_point.point.z = 0.0;
+
+    try{
+        node->transformListener.transformPoint(to_frame, from_point, to_point);
+        //ROS_INFO("scanner: (%.2f, %.2f. %.2f) -----> %s: (%.2f, %.2f, %.2f) at time %.2f",
+        //     to_frame.c_str(),
+        //     from_point.point.x, from_point.point.y, from_point.point.z,
+        //     to_point.point.x, to_point.point.y, to_point.point.z, to_point.header.stamp.toSec());
+    }
+    catch(tf::TransformException& ex){
+        ROS_ERROR("Received an exception trying to transform a point from \"%s\" to \"%s\": %s", from_frame.c_str(), to_frame.c_str(), ex.what());
+    }
+
+    return { meter_t(to_point.point.x), meter_t(to_point.point.y) };
+}
+
 AbsoluteMap absMap;
 
 struct AbsPoint {
@@ -102,6 +150,11 @@ struct LaserMeas {
 
         return dist;
     }
+
+    meter_t getDistanceInDirection(const Point2m& odomPoint) const {
+        const Point2m lidarPoint = transformPoint("odom", SCAN_TF_FRAME, odomPoint, this->scan->header.stamp);
+        return this->getDistance(atan2(lidarPoint.Y, lidarPoint.X));
+    }
 };
 
 struct Group {
@@ -150,59 +203,6 @@ ros::Publisher *staticScanPub = nullptr;
 ros::Publisher *obstaclesPub = nullptr;
 
 int32_t maxGroupIdx = Group::INVALID_IDX;
-
-Pose transformPose(const std::string& from_frame, const std::string& to_frame, const Pose& p, const ros::Time& time = ros::Time()) {
-
-    geometry_msgs::PoseStamped from_pose;
-    geometry_msgs::PoseStamped to_pose;
-
-    from_pose.header.frame_id = from_frame;
-    from_pose.header.stamp = time;
-    from_pose.pose = bcr::ros_convert(p);
-    
-    try{
-        node->transformListener.transformPose(to_frame, from_pose, to_pose);
-        //ROS_INFO("scanner: (%.2f, %.2f. %.2f) -----> %s: (%.2f, %.2f, %.2f) at time %.2f",
-        //     to_frame.c_str(),
-        //     from_pose.point.x, from_pose.point.y, from_pose.point.z,
-        //     to_pose.point.x, to_pose.point.y, to_pose.point.z, to_pose.header.stamp.toSec());
-    }
-    catch(tf::TransformException& ex){
-        ROS_ERROR("Received an exception trying to transform a pose from \"%s\" to \"%s\": %s", from_frame.c_str(), to_frame.c_str(), ex.what());
-    }
-
-    return bcr::ros_convert(to_pose.pose);
-}
-
-Point2m transformPoint(const std::string& from_frame, const std::string& to_frame, const Point2m& p, const ros::Time time = ros::Time()) {
-
-    geometry_msgs::PointStamped from_point;
-    geometry_msgs::PointStamped to_point;
-
-    from_point.header.frame_id = from_frame;
-    from_point.header.stamp = time;
-    from_point.point.x = p.X.get();
-    from_point.point.y = p.Y.get();
-    from_point.point.z = 0.0;
-    
-    try{
-        node->transformListener.transformPoint(to_frame, from_point, to_point);
-        //ROS_INFO("scanner: (%.2f, %.2f. %.2f) -----> %s: (%.2f, %.2f, %.2f) at time %.2f",
-        //     to_frame.c_str(),
-        //     from_point.point.x, from_point.point.y, from_point.point.z,
-        //     to_point.point.x, to_point.point.y, to_point.point.z, to_point.header.stamp.toSec());
-    }
-    catch(tf::TransformException& ex){
-        ROS_ERROR("Received an exception trying to transform a point from \"%s\" to \"%s\": %s", from_frame.c_str(), to_frame.c_str(), ex.what());
-    }
-
-    return { meter_t(to_point.point.x), meter_t(to_point.point.y) };
-}
-
-meter_t getDistInDirection(const LaserMeas& meas, const Point2m& odomPoint) {
-    const Point2m lidarPoint = transformPoint("odom", SCAN_TF_FRAME, odomPoint, meas.scan->header.stamp);
-    return meas.odom.pose.pos.distance(lidarPoint);
-}
 
 std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const std::vector<radian_t>& negDiffAngles) {
     std::vector<Group> groups;
@@ -267,7 +267,11 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
                         }
                     }
 
-                    groups.push_back(before);   // TODO order should be before, current, after (now: current, before, after)
+                    Group current = *currentGroup;
+                    groups.erase(currentGroup);
+
+                    groups.push_back(before);
+                    groups.push_back(current);
                     groups.push_back(after);
                 }
 
@@ -487,7 +491,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                 // but first checks if current distance is smaller than the previous, otherwise it is not a moving object that we have detected,
                 // but the wall behind an object that is moving away
                 if (std::find_if(prev.points.begin(), prev.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absOdomPos.distance(prevPoint.absOdomPos) < eps; }) == prev.points.end()) {
-                    const meter_t prev_dist = getDistInDirection(prev, p.absOdomPos);
+                    const meter_t prev_dist = prev.getDistanceInDirection(p.absOdomPos);
                     //const radian_t prev_angle = prev.odom.pose.pos.getAngle(p.absOdomPos) - prev.odom.pose.angle;
                     //const meter_t prev_dist = prev.getDistance(prev_angle);
                     //const Point2m prevAbsPoint = rayDistToAbsPoint(prev, prev_angle, prev_dist);
@@ -497,8 +501,8 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                         diffPoints.push_back(&p);
                         //ROS_INFO("odom: %f, %f, angle: %f", meas.odom.pose.pos.X.get(), meas.odom.pose.pos.Y.get(), meas.odom.pose.angle.get());
                         //ROS_INFO("prev odom: %f, %f, angle: %f", prev.odom.pose.pos.X.get(), prev.odom.pose.pos.Y.get(), prev.odom.pose.angle.get());
-                        //ROS_INFO("diff point: (%f, %f) - dist: %f, prev: (%f, %f) - dist: %f", p.absOdomPos.X.get(), p.absOdomPos.Y.get(), cur_dist.get(), prevAbsPoint.X.get(), prevAbsPoint.Y.get(), prev_dist.get());
-                        diffGrid.data[p.mapGridPos.Y * diffGrid.info.width + p.mapGridPos.X] = 100;
+                        //ROS_INFO("dist: %f, prev: %f", cur_dist.get(), prev_dist.get());
+                        //diffGrid.data[p.mapGridPos.Y * diffGrid.info.width + p.mapGridPos.X] = 100;
                         break;
                     }
                 }
@@ -528,7 +532,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                 // but the wall behind an object that is moving away
                 if (std::find_if(m.points.begin(), m.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absOdomPos.distance(prevPoint.absOdomPos) < eps; }) == m.points.end()) {
                     const meter_t dist = meter_t(prevMeas.scan->ranges[p.idx]);
-                    const meter_t other_dist = getDistInDirection(m, p.absOdomPos);
+                    const meter_t other_dist = m.getDistanceInDirection(p.absOdomPos);
 
                     //ROS_INFO("possible diff point: %d: (%d, %d)", p.idx, p.mapGridPos.X, p.mapGridPos.Y);
 
@@ -585,23 +589,33 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             const millisecond_t prev_current_dt  = meas.time - prevScans[bcr::sub_underflow(prevScans.size() - 1, 1, prevScans.size())].time;
             const millisecond_t speedFilter_dt   = meas.time - prevScans[bcr::sub_underflow(prevScans.size() - 1, NUM_SPEED_FILTER, prevScans.size())].time;
 
-            for (Group& g : groups) {
-                if (g.isMoving()) {
+            for (const Group& prev : prevGroups) {
+                if (prev.isMoving()) {
 
                     // checks if group exised in the previous measurement
                     // if yes, inherits id
-                    meter_t minDist = centimeter_t(40);
-                    for (const Group& prev : prevGroups) {
-                        if (prev.isMoving()) {
-                            const meter_t dist = (prev.center + prev.speed * prev_current_dt).distance(g.center);
+                    meter_t minDist = centimeter_t(80);
+                    std::vector<Group>::iterator nearest = groups.end();
+
+                    for (std::vector<Group>::iterator it = groups.begin(); it != groups.end(); ++it) {
+                        if (it->isMoving()) {
+                            const meter_t dist = (prev.center + prev.speed * prev_current_dt).distance(it->center);
                             //ROS_INFO("dist: %f", dist.get());
                             if (dist < minDist) {
                                 minDist = dist;
-                                g.idx = prev.idx;
+                                nearest = it;
                             }
                         }
                     }
 
+                    if (nearest != groups.end()) {
+                        nearest->idx = prev.idx;
+                    }
+                }
+            }
+
+            for (Group& g : groups) {
+                if (g.isMoving()) {
                     // new group -> new id
                     if (g.idx == Group::INVALID_IDX) {
                         g.idx = ++maxGroupIdx;
@@ -614,34 +628,23 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             for (const Group& prev : prevGroups) {
                 // if previous group is not found in the current measurement, makes it appear for awhile
                 if (prev.forcedCntr < MAX_GROUP_FORCE_APPEAR_COUNT && prev.isMoving()) {
-                    bool found = false;
-                    for (const Group& g : groups) {
-                        if (prev.idx == g.idx) {
-                            found = true;
-                            break;
-                        }
-                    }
 
-                    if (!found) {
+                    if (std::find_if(groups.begin(), groups.end(), [&prev] (const Group& g) { return prev.idx == g.idx; }) == groups.end()) {
                         groups.push_back(Group::createFromPrev(prev, prev_current_dt));
                     }
                 }
             }
 
             for (Group& g : groups) {
-                if (g.isMoving()) {
+                if (g.isMoving() && !g.forcedCntr) {
 
+                    // calculates group speed
                     const std::vector<Group>& prevGroups = prevGroupsList[bcr::sub_underflow(prevGroupsList.size(), NUM_SPEED_FILTER, prevGroupsList.size())];
-                    std::vector<Group>::const_iterator it;
-                    for (it = prevGroups.begin(); it != prevGroups.end(); ++it) {
-                        if (it->idx == g.idx) {
-                            break;
-                        }
-                    }
+                    std::vector<Group>::const_iterator it = std::find_if(prevGroups.begin(), prevGroups.end(), [&g] (const Group& pg) { return pg.idx == g.idx; });
 
                     if (it != prevGroups.end()) {
                         g.speed = { (g.center.X - it->center.X) / speedFilter_dt, (g.center.Y - it->center.Y) / speedFilter_dt };
-                        ROS_INFO("Group #%d: (%f - %f) m / %f ms = %f m/s", g.idx, g.center.X.get(), g.center.Y.get(), speedFilter_dt.get(), g.speed.length().get());
+                        //ROS_INFO("Group #%d: (%f - %f) m / %f ms = %f m/s", g.idx, g.center.X.get(), g.center.Y.get(), speedFilter_dt.get(), g.speed.length().get());
                         //ROS_INFO("sp: %f", g.speed.length().get());
                     } else {
                         g.speed = { speed_t::ZERO(), speed_t::ZERO() };
@@ -652,13 +655,17 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             for (Group& g : groups) {
                 if (g.isMoving()) {
                     const m_per_sec_t speed = g.speed.length();
-                    if (bcr::abs(speed) > m_per_sec_t(0.05f) && !bcr::isinf(speed)) {
+                    if (bcr::isinf(speed)) {
+                        g.speed = { speed_t::ZERO(), speed_t::ZERO() };
+                    }
+
+                    if (bcr::abs(speed) > m_per_sec_t(0.05f)) {
                         filteredGroups.push_back(g);
                         const std::string forced = g.forcedCntr > 0 ? " (forced: " + std::to_string(g.forcedCntr) + ")" : "";
-                        //ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } (%f) m/s", g.idx, g.center.X.get(), g.center.Y.get(), forced.c_str(), g.speed.X.get(), g.speed.Y.get(), g.speed.length().get());
+                        ROS_INFO("Group #%d: %f, %f%s - speed: { %f, %f } (%f) m/s", g.idx, g.center.X.get(), g.center.Y.get(), forced.c_str(), g.speed.X.get(), g.speed.Y.get(), g.speed.length().get());
                         for (const AbsPoint *p : g.points) {
-                            //ROS_INFO("group point: %d: (%d, %d)", p->idx, p->mapGridPos.X, p->mapGridPos.Y);
-                            //diffGrid.data[p->mapGridPos.Y * diffGrid.info.width + p->mapGridPos.X] = 100;
+                            ROS_INFO("group point: %d: (%d, %d)", p->idx, p->mapGridPos.X, p->mapGridPos.Y);
+                            diffGrid.data[p->mapGridPos.Y * diffGrid.info.width + p->mapGridPos.X] = 100;
                         }
                     }
                 }
