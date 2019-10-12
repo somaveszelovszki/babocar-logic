@@ -8,15 +8,15 @@ add_compile_options(-std=c++11)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  babocar-core
+  geometry_msgs
+  message_generation
+  nav_msgs
   roscpp
   rospy
   std_msgs
-  geometry_msgs
-  nav_msgs
-  visualization_msgs
-  message_generation
   tf
-  babocar-core
+  visualization_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -196,8 +196,6 @@ target_link_libraries(decomposer ${catkin_LIBRARIES} environment-builder)
 ## Add gtest based cpp test target and link libraries
 catkin_add_gtest(${PROJECT_NAME}-test
   test/run_tests.cpp
-  #test/units.cpp
-  #test/vec.cpp
 )
 if(TARGET ${PROJECT_NAME}-test)
   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
