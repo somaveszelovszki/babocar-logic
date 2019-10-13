@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>environment-builder</name>
+  <name>environment_builder</name>
   <version>0.0.0</version>
   <description>Package for selecting static and dynamic map objects from an occupancy grid stream.</description>
 
@@ -39,9 +39,9 @@
   <build_depend>visualization_msgs</build_depend>
   <build_depend>message_generation</build_depend>
   <build_depend>tf</build_depend>
-  <build_depend>babocar-core</build_depend>
+  <build_depend>babocar_core</build_depend>
 
-  <build_export_depend>babocar-core</build_export_depend>
+  <build_export_depend>babocar_core</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
 
   <exec_depend>roscpp</exec_depend>
@@ -52,7 +52,7 @@
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>message_runtime</exec_depend>
   <exec_depend>tf</exec_depend>
-  <exec_depend>babocar-core</exec_depend>
+  <exec_depend>babocar_core</exec_depend>
 
   <test_depend>rosunit</test_depend>
 

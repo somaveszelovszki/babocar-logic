@@ -15,6 +15,8 @@
 #include <nav_msgs/OccupancyGrid.h>
 #include <nav_msgs/Odometry.h>
 #include <visualization_msgs/MarkerArray.h>
+#include <environment_builder/DynamicObjectArray.h>
+
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 
@@ -200,6 +202,7 @@ std::vector<DynamicObject> dynamicObjects;
 ros::Publisher *diffGridPub = nullptr;
 ros::Publisher *staticGridPub = nullptr;
 ros::Publisher *staticScanPub = nullptr;
+ros::Publisher *dynamicObjectsPub = nullptr;
 ros::Publisher *obstaclesPub = nullptr;
 
 int32_t maxGroupIdx = Group::INVALID_IDX;
@@ -354,6 +357,7 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
 
 void sendObstacles(const std::vector<Group>& groups) {
     visualization_msgs::MarkerArray obstacles;
+    environment_builder::DynamicObjectArray dynamicObjects;
 
     for (const Group& g : groups) {
         if (g.isMoving()) {
@@ -392,6 +396,12 @@ void sendObstacles(const std::vector<Group>& groups) {
             object_marker.color.b = 1.0;
             object_marker.lifetime = ros::Duration(0.5);
             obstacles.markers.push_back(object_marker);
+
+            environment_builder::DynamicObject dynObj;
+            dynObj.radius = g.radius.get();
+            dynObj.pose   = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(speed_t::ZERO(), speed_t::ZERO()).getAngle(g.speed) });
+            dynObj.twist  = bcr::ros_convert(bcr::Twist{ g.speed.X, g.speed.Y, rad_per_sec_t::ZERO() });
+            dynamicObjects.objects.push_back(dynObj);
         }
     }
 
@@ -399,6 +409,7 @@ void sendObstacles(const std::vector<Group>& groups) {
     diffGrid.info.resolution = static_cast<meter_t>(MAP_RES).get();
 
     obstaclesPub->publish(obstacles);
+    dynamicObjectsPub->publish(dynamicObjects);
 }
 
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
@@ -732,6 +743,9 @@ int main(int argc, char **argv)
 
     ros::Publisher staticScanPublisher = node->advertise<sensor_msgs::LaserScan>("static_scan", 10);
     staticScanPub = &staticScanPublisher;
+
+    ros::Publisher dynamicObjectsPublisher = node->advertise<environment_builder::DynamicObjectArray>("dynamic_objects", 10);
+    dynamicObjectsPub = &dynamicObjectsPublisher;
 
     ros::Publisher obstaclesPublisher = node->advertise<visualization_msgs::MarkerArray>("obstacles", 0);
     obstaclesPub = &obstaclesPublisher;
