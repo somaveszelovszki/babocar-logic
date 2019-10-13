@@ -3,12 +3,16 @@
 #include <babocar-core/container/vec.hpp>
 #include <babocar-core/odometry.hpp>
 #include <babocar-core/ros/ros_node.hpp>
-#include <babocar-core/ros/ros_convert.hpp>
 #include <babocar-core/unit_utils.hpp>
+#include <babocar-core/ros/ros_convert.hpp>
+#include <environment-builder/dynamic_object.hpp>
+#include <environment-builder/ros_convert.hpp>
 
 #include <ros/ros.h>
 #include <nav_msgs/OccupancyGrid.h>
 #include <nav_msgs/Odometry.h>
+#include <environment_builder/DynamicObjectArray.h>
+
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 
@@ -81,6 +85,13 @@ Point2m transformPoint(const std::string& from_frame, const std::string& to_fram
     return { meter_t(to_point.point.x), meter_t(to_point.point.y) };
 }
 
+void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dynamicObjects) {
+    for (const environment_builder::DynamicObject& o : dynamicObjects->objects) {
+        DynamicObject obj = bcr::ros_convert(o);
+        ROS_INFO("Object: pos: (%f, %f), speed: (%f, %f)", obj.odom.pose.pos.X.get(), obj.odom.pose.pos.Y.get(), obj.odom.twist.X.get(), obj.odom.twist.Y.get());
+    }
+}
+
 void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
     carOdom_ros = *odom;
     carOdom = bcr::ros_convert(*odom);
@@ -95,6 +106,7 @@ int main(int argc, char **argv)
     ros::init(argc, argv, NODE_NAME);
     node.reset(new VoMapBuilderNode(NODE_NAME));
     ros::Subscriber odomSub = node->subscribe<nav_msgs::Odometry>("odom", 1, odomCallback);
+    ros::Subscriber dynObjSub = node->subscribe<environment_builder::DynamicObjectArray>("dynamic_objects", 1, dynObjCallback);
 
     //ros::Publisher diffGridPublisher = node->advertise<nav_msgs::OccupancyGrid>("diff_grid", 10);
     //diffGridPub = &diffGridPublisher;

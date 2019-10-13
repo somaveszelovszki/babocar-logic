@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(local-planner)
+project(local_planner)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
@@ -8,8 +8,9 @@ add_compile_options(-std=c++11)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  babocar-core
+  babocar_core
   geometry_msgs
+  environment_builder
   message_generation
   nav_msgs
   roscpp
@@ -141,7 +142,7 @@ include_directories(
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(vo_map_builder src/vo_map_builder.cpp)
 target_link_libraries(vo_map_builder ${catkin_LIBRARIES} 
-  #local-planner
+  #local_planner
 )
 
 ## Rename C++ executable without prefix

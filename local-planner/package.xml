@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>local-planner</name>
+  <name>local_planner</name>
   <version>0.0.0</version>
   <description>Package for local trajectory planning based on the static and dynamic maps.</description>
 
@@ -39,9 +39,11 @@
   <build_depend>visualization_msgs</build_depend>
   <build_depend>message_generation</build_depend>
   <build_depend>tf</build_depend>
-  <build_depend>babocar-core</build_depend>
+  <build_depend>babocar_core</build_depend>
+  <build_depend>environment_builder</build_depend>
 
-  <build_export_depend>babocar-core</build_export_depend>
+  <build_export_depend>babocar_core</build_export_depend>
+  <build_export_depend>environment_builder</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
 
   <exec_depend>roscpp</exec_depend>
@@ -52,7 +54,8 @@
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>message_runtime</exec_depend>
   <exec_depend>tf</exec_depend>
-  <exec_depend>babocar-core</exec_depend>
+  <exec_depend>babocar_core</exec_depend>
+  <exec_depend>environment_builder</exec_depend>
 
   <test_depend>rosunit</test_depend>
 
