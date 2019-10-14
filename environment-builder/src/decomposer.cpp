@@ -112,7 +112,7 @@ struct AbsPoint {
     int32_t idx;
     Point2m absOdomPos;
     Point2m absMapPos;
-    Point2i mapGridPos;
+    Point2<uint32_t> mapGridPos;
     State state;
 };
 
@@ -454,12 +454,11 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
     absMap.grid.info.width = absMap.grid.info.height = MAP_SIZE / MAP_RES;
     absMap.grid.info.resolution = static_cast<meter_t>(MAP_RES).get();
 
-    absMap.grid.info.origin.position.x = 0;
-    absMap.grid.info.origin.position.y = 0;
-    absMap.grid.info.origin.position.z = 0;
     tf::quaternionTFToMsg(q, absMap.grid.info.origin.orientation);
 
     absMap.grid.info.map_load_time = absMap.grid.header.stamp;
+
+    absMap.updateCenter(carOdom.pose.pos);
 
     ROS_INFO("------------------------------------------------");
 

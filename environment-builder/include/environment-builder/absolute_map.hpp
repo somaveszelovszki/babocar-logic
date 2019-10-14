@@ -21,11 +21,7 @@ public:
 
     void initialize(meter_t _size, meter_t _resolution);
 
-    CellState get(const Point2i& pos) const;
-
-    CellState get(int32_t x, int32_t y) const;
-
-    void set(const Point2i& pos, CellState state);
+    void updateCenter(const Point2m& center);
 
     CellState getNearest(const Point2m& point) const;
 
@@ -35,20 +31,28 @@ public:
 
     void setRay(const Point2m& center, radian_t angle);
 
-    Point2i getNearestIndexes(const Point2m& point) const;
+    Point2<uint32_t> getNearestIndexes(const Point2m& point) const;
 
     bool isInside(const Point2m& point) const;
 
-    uint32_t numObstacleNeighbours(const Point2i& point, uint32_t delta) const;
+    uint32_t numObstacleNeighbours(const Point2<uint32_t>& point, uint32_t delta) const;
 
     nav_msgs::OccupancyGrid grid;   // TODO use only one implementation (this or own)
 
 private:
-    Point2i center;
+    CellState get(const Point2<uint32_t>& pos) const;
+
+    void set(const Point2<uint32_t>& pos, CellState state);
+
+    Point2m center;
     meter_t size_;
     meter_t resolution_;
-    int32_t row_size_;
+    uint32_t row_size_;
     std::vector<CellState> cells;
+    std::vector<CellState> tempCells;
+
+    int32_t prev_x;
+    int32_t prev_y;
 };
 
 } // namespace bcr
