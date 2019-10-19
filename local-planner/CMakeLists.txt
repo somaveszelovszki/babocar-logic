@@ -110,9 +110,9 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES local-planner
-#  CATKIN_DEPENDS babocar-core geometry_msgs message_generation nav_msgs roscpp rospy std_masgs tf visualization_msgs
+  INCLUDE_DIRS include
+  LIBRARIES local_planner
+  CATKIN_DEPENDS message_runtime
 #  DEPENDS system_lib
 )
 
@@ -123,14 +123,14 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+  include
   ${catkin_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
-# add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/local-planner.cpp
-# )
+add_library(${PROJECT_NAME}
+  src/velocity_obstacle.cpp
+)
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -141,9 +141,7 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(vo_map_builder src/vo_map_builder.cpp)
-target_link_libraries(vo_map_builder ${catkin_LIBRARIES} 
-  #local_planner
-)
+target_link_libraries(vo_map_builder ${catkin_LIBRARIES} local_planner)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -202,6 +200,7 @@ target_link_libraries(vo_map_builder ${catkin_LIBRARIES}
 ## Add gtest based cpp test target and link libraries
 catkin_add_gtest(${PROJECT_NAME}-test
   test/run_tests.cpp
+  test/velocity_obstacle.cpp
 )
 if(TARGET ${PROJECT_NAME}-test)
   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
