@@ -368,7 +368,7 @@ void sendObstacles(const std::vector<Group>& groups) {
             speed_marker.id = g.idx;
             speed_marker.type = visualization_msgs::Marker::ARROW;
             speed_marker.action = visualization_msgs::Marker::ADD;
-            speed_marker.pose = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(speed_t::ZERO(), speed_t::ZERO()).getAngle(g.speed) });
+            speed_marker.pose = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(m_per_sec_t::ZERO(), m_per_sec_t::ZERO()).getAngle(g.speed) });
             speed_marker.scale.x = 1 * g.speed.length().get();
             speed_marker.scale.y = 0.1;
             speed_marker.scale.z = 0.1;
@@ -386,7 +386,7 @@ void sendObstacles(const std::vector<Group>& groups) {
             object_marker.id = std::numeric_limits<int32_t>::max() - g.idx;
             object_marker.type = visualization_msgs::Marker::SPHERE;
             object_marker.action = visualization_msgs::Marker::ADD;
-            object_marker.pose = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(speed_t::ZERO(), speed_t::ZERO()).getAngle(g.speed) });
+            object_marker.pose = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(m_per_sec_t::ZERO(), m_per_sec_t::ZERO()).getAngle(g.speed) });
             object_marker.scale.x = g.radius.get();
             object_marker.scale.y = g.radius.get();
             object_marker.scale.z = 1.0;
@@ -399,8 +399,8 @@ void sendObstacles(const std::vector<Group>& groups) {
 
             environment_builder::DynamicObject dynObj;
             dynObj.radius = g.radius.get();
-            dynObj.pose   = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(speed_t::ZERO(), speed_t::ZERO()).getAngle(g.speed) });
-            dynObj.twist  = bcr::ros_convert(bcr::Twist{ g.speed.X, g.speed.Y, rad_per_sec_t::ZERO() });
+            dynObj.pose   = bcr::ros_convert(bcr::Pose{ g.center, Point2mps(m_per_sec_t::ZERO(), m_per_sec_t::ZERO()).getAngle(g.speed) });
+            dynObj.twist  = bcr::ros_convert(bcr::Twist{ g.speed, rad_per_sec_t::ZERO() });
             dynamicObjects.objects.push_back(dynObj);
         }
     }
@@ -657,7 +657,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                         //ROS_INFO("Group #%d: (%f - %f) m / %f ms = %f m/s", g.idx, g.center.X.get(), g.center.Y.get(), speedFilter_dt.get(), g.speed.length().get());
                         //ROS_INFO("sp: %f", g.speed.length().get());
                     } else {
-                        g.speed = { speed_t::ZERO(), speed_t::ZERO() };
+                        g.speed = { m_per_sec_t::ZERO(), m_per_sec_t::ZERO() };
                     }
                 }
             }
@@ -666,7 +666,7 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                 if (g.isMoving()) {
                     const m_per_sec_t speed = g.speed.length();
                     if (bcr::isinf(speed)) {
-                        g.speed = { speed_t::ZERO(), speed_t::ZERO() };
+                        g.speed = { m_per_sec_t::ZERO(), m_per_sec_t::ZERO() };
                     }
 
                     if (bcr::abs(speed) > m_per_sec_t(0.05f)) {
