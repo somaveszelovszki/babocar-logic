@@ -7,6 +7,9 @@
 #include <babocar-core/ros/ros_convert.hpp>
 #include <environment-builder/dynamic_object.hpp>
 #include <environment-builder/ros_convert.hpp>
+#include <local-planner/collision.hpp>
+#include <local-planner/dynamic_window.hpp>
+#include <local-planner/trajectory.hpp>
 
 #include <ros/ros.h>
 #include <nav_msgs/OccupancyGrid.h>
@@ -32,10 +35,32 @@ public:
 
 std::unique_ptr<VoMapBuilderNode> node = nullptr;
 
-// TODO use tf
+static constexpr millisecond_t RUN_PERIOD(200);
 
-nav_msgs::Odometry carOdom_ros;
-Odometry carOdom;
+static constexpr centimeter_t CAR_RADIUS(25);
+static constexpr centimeter_t CAR_FRONT_REAR_WHEEL_AXIS_DIST(35);
+static constexpr m_per_sec_t MAX_SPEED_BWD(0.5);
+static constexpr m_per_sec_t MAX_SPEED_FWD(1.0);
+static constexpr degree_t MAX_WHEEL_ANGLE(30);
+static constexpr m_per_sec2_t MAX_ACCELERATION(0.5);
+static constexpr deg_per_sec_t MAX_WHEEL_ANGULAR_VELOCITY = degree_t(60) / millisecond_t(200);
+
+static constexpr m_per_sec_t DYNAMIC_WINDOW_SPEED_RESOLUTION(0.1);
+static constexpr degree_t DYNAMIC_WINDOW_WHEEL_ANGLE_RESOLUTION(1);
+
+static DynamicObject car = {
+    CAR_RADIUS,
+    Odometry {
+        Pose { { meter_t(0), meter_t(0) }, degree_t(90) },
+        Twist { { m_per_sec_t(0), m_per_sec_t(0) }, rad_per_sec_t(0) }
+    }
+};
+
+static DynamicWindow window(
+    MAX_SPEED_BWD, MAX_SPEED_FWD, MAX_WHEEL_ANGLE,
+    MAX_ACCELERATION * RUN_PERIOD, MAX_WHEEL_ANGULAR_VELOCITY * RUN_PERIOD,
+    DYNAMIC_WINDOW_SPEED_RESOLUTION, DYNAMIC_WINDOW_WHEEL_ANGLE_RESOLUTION
+);
 
 Pose transformPose(const std::string& from_frame, const std::string& to_frame, const Pose& p, const ros::Time& time = ros::Time()) {
 
@@ -86,15 +111,18 @@ Point2m transformPoint(const std::string& from_frame, const std::string& to_fram
 }
 
 void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dynamicObjects) {
+    ROS_INFO("----------------------------------------------------");
     for (const environment_builder::DynamicObject& o : dynamicObjects->objects) {
         DynamicObject obj = bcr::ros_convert(o);
-        ROS_INFO("Object: pos: (%f, %f), speed: (%f, %f)", obj.odom.pose.pos.X.get(), obj.odom.pose.pos.Y.get(), obj.odom.twist.X.get(), obj.odom.twist.Y.get());
+        ROS_INFO("Object: pos: (%f, %f), speed: (%f, %f)", obj.odom.pose.pos.X.get(), obj.odom.pose.pos.Y.get(), obj.odom.twist.speed.X.get(), obj.odom.twist.speed.Y.get());
     }
+
+    const m_per_sec_t speed = car.odom.twist.speed.length();
+    window.update(speed, bcr::getWheelAngle(CAR_FRONT_REAR_WHEEL_AXIS_DIST, speed, car.odom.twist.ang_vel));
 }
 
 void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
-    carOdom_ros = *odom;
-    carOdom = bcr::ros_convert(*odom);
+    car.odom = bcr::ros_convert(*odom);
     //ROS_INFO("Car pos: [%f, %f] m, orientation: %f deg", static_cast<meter_t>(carOdom.pose.pos.X).get(), static_cast<meter_t>(carOdom.pose.pos.Y).get(), static_cast<radian_t>(carOdom.pose.angle).get());
 }
 

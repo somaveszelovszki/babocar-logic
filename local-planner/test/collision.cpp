@@ -1,4 +1,4 @@
-#include <local-planner/velocity_obstacle.hpp>
+#include <local-planner/collision.hpp>
 
 #include <gtest/gtest.h>
 

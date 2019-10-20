@@ -129,7 +129,9 @@ include_directories(
 
 ## Declare a C++ library
 add_library(${PROJECT_NAME}
-  src/velocity_obstacle.cpp
+  src/collision.cpp
+  src/dynamic_window.cpp
+  src/trajectory.cpp
 )
 
 ## Add cmake target dependencies of the library
@@ -200,7 +202,7 @@ target_link_libraries(vo_map_builder ${catkin_LIBRARIES} local_planner)
 ## Add gtest based cpp test target and link libraries
 catkin_add_gtest(${PROJECT_NAME}-test
   test/run_tests.cpp
-  test/velocity_obstacle.cpp
+  test/collision.cpp
 )
 if(TARGET ${PROJECT_NAME}-test)
   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
