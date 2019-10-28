@@ -38,7 +38,7 @@ TEST(velocity_obstacle, getDistanceToCollision_1_solution) {
     EXPECT_NEAR(1.0, bcr::getDistanceToCollision(obj1, obj2).get(), 0.0001);
 }
 
-TEST(velocity_obstacle, getDistanceToCollision_2_solutions_1) {
+TEST(velocity_obstacle, getTimeToFirstCollision_iterative_1_obj_2_solutions_1) {
 
     DynamicObject obj1;
     obj1.radius = meter_t(0.5);
@@ -55,7 +55,7 @@ TEST(velocity_obstacle, getDistanceToCollision_2_solutions_1) {
     EXPECT_NEAR(1.0, bcr::getDistanceToCollision(obj1, obj2).get(), 0.0001);
 }
 
-TEST(velocity_obstacle, getDistanceToCollision_2_solutions_2) {
+TEST(velocity_obstacle, getTimeToFirstCollision_iterative_1_obj_2_solutions_2) {
 
     DynamicObject obj1;
     obj1.radius = meter_t(1.0);
@@ -72,7 +72,7 @@ TEST(velocity_obstacle, getDistanceToCollision_2_solutions_2) {
     EXPECT_NEAR(5.0 - std::sqrt(2), bcr::getDistanceToCollision(obj1, obj2).get(), 0.0001);
 }
 
-TEST(velocity_obstacle, getDistanceToCollision_iterative_straight) {
+TEST(velocity_obstacle, getTimeToFirstCollision_iterative_1_obj_straight) {
 
     DynamicObject obj1;
     obj1.radius = meter_t(1.0);
@@ -86,10 +86,10 @@ TEST(velocity_obstacle, getDistanceToCollision_iterative_straight) {
     obj2.odom.twist.speed = { m_per_sec_t(-1.0), m_per_sec_t(0.0) };
     obj2.odom.twist.ang_vel = rad_per_sec_t(0.0);
 
-    EXPECT_NEAR(5.0 - std::sqrt(2), bcr::getDistanceToCollision_iterative(obj1, obj2, meter_t(5), millisecond_t(50)).get(), 0.1);
+    EXPECT_NEAR(5.0 - std::sqrt(2), static_cast<second_t>(bcr::getTimeToFirstCollision_iterative(obj1, { obj2 }, second_t(5), millisecond_t(50))).get(), 0.1);
 }
 
-TEST(velocity_obstacle, getDistanceToCollision_iterative_curve) {
+TEST(velocity_obstacle, getTimeToFirstCollision_iterative_1_obj_curve) {
 
     const m_per_sec_t speed(1.0);
     const meter_t collisionDistance = meter_t(5) * M_PI / 2;
@@ -107,10 +107,10 @@ TEST(velocity_obstacle, getDistanceToCollision_iterative_curve) {
     obj2.odom.twist.speed = { m_per_sec_t(0.0), m_per_sec_t(0.0) };
     obj2.odom.twist.ang_vel = rad_per_sec_t(0.0);
 
-    EXPECT_NEAR(collisionDistance.get(), bcr::getDistanceToCollision_iterative(obj1, obj2, meter_t(10), millisecond_t(50)).get(), 0.1);
+    EXPECT_NEAR(collisionTime.get(), bcr::getTimeToFirstCollision_iterative(obj1, { obj2 }, second_t(10), millisecond_t(50)).get(), 50.0);
 }
 
-TEST(velocity_obstacle, getDistanceToCollision_iterative_curve_no_collision) {
+TEST(velocity_obstacle, getTimeToFirstCollision_iterative_1_obj_curve_no_collision) {
 
     DynamicObject obj1;
     obj1.radius = meter_t(1.0);
@@ -124,10 +124,10 @@ TEST(velocity_obstacle, getDistanceToCollision_iterative_curve_no_collision) {
     obj2.odom.twist.speed = { m_per_sec_t(0.0), m_per_sec_t(0.0) };
     obj2.odom.twist.ang_vel = rad_per_sec_t(0.0);
 
-    EXPECT_EQ(std::numeric_limits<float64_t>::infinity(), bcr::getDistanceToCollision_iterative(obj1, obj2, meter_t(10), millisecond_t(50)).get());
+    EXPECT_EQ(10000, bcr::getTimeToFirstCollision_iterative(obj1, { obj2 }, second_t(10), millisecond_t(50)).get());
 }
 
-TEST(velocity_obstacle, getDistanceToFirstCollision_iterative) {
+TEST(velocity_obstacle, getTimeToFirstCollision_iterative) {
 
     const m_per_sec_t speed(1.0);
     const meter_t collisionDistance = meter_t(5) * M_PI / 2;
@@ -157,5 +157,5 @@ TEST(velocity_obstacle, getDistanceToFirstCollision_iterative) {
     obj4.odom.twist.speed = { m_per_sec_t(0.5), m_per_sec_t(0.0) };
     obj4.odom.twist.ang_vel = deg_per_sec_t(10.0);
 
-    EXPECT_NEAR(collisionDistance.get(), bcr::getDistanceToFirstCollision_iterative(obj1, { obj2, obj3, obj4 }, meter_t(10), millisecond_t(50)).get(), 0.1);
+    EXPECT_NEAR(collisionTime.get(), bcr::getTimeToFirstCollision_iterative(obj1, { obj2, obj3, obj4 }, second_t(10), millisecond_t(50)).get(), 50.0);
 }

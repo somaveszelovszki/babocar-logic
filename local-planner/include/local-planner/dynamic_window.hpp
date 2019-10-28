@@ -16,14 +16,9 @@ public:
 
     void update(m_per_sec_t actualSpeed, radian_t actualWheelAngle);
 
-    bool isAvailable(m_per_sec_t speed, radian_t wheelAngle) const;
-
     std::vector<std::vector<VelocityObstacle>>& getWindow(void) { return this->window; }
 
 private:
-    std::pair<size_t, size_t> getIndexes(m_per_sec_t speed, radian_t wheelAngle) const;
-    std::pair<m_per_sec_t, radian_t> getDynamics(size_t rowIdx, size_t colIdx) const;
-
     // absolute limits
     const m_per_sec_t maxSpeedBwd;
     const m_per_sec_t maxSpeedFwd;
@@ -37,10 +32,12 @@ private:
     std::vector<std::vector<VelocityObstacle>> window; // the window of permitted speed and angular velocity values - rows: speeds, columns: wheel angles
     const m_per_sec_t wRes_speed; 
     const radian_t wRes_wheelAngle;
-    m_per_sec_t wMin_speed;
-    m_per_sec_t wMax_speed;
-    radian_t wMin_wheelAngle;
-    radian_t wMax_wheelAngle;
+
+    m_per_sec_t wCenter_speed;
+    size_t wCenter_speedIdx;
+
+    radian_t wCenter_wheelAngle;
+    size_t wCenter_wheelAngleIdx;
 };
 
 } // namespace bcr

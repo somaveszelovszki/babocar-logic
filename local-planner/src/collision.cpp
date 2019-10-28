@@ -18,14 +18,10 @@ struct diff {
         , angle_per_2_sine(bcr::sin(angle_per_2))
         , angle_per_2_cosine(bcr::cos(angle_per_2)) {}
 
-    void apply(Odometry& odom, meter_t *dist) {
+    void apply(Odometry& odom) {
         odom.twist.speed.rotate(this->angle_per_2_sine, this->angle_per_2_cosine);
         odom.pose.pos += odom.twist.speed * this->step;
         odom.twist.speed.rotate(this->angle_per_2_sine, this->angle_per_2_cosine);
-
-        if (dist) {
-            *dist += this->dist;
-        }
     }
 };
 
@@ -57,13 +53,10 @@ meter_t getDistanceToCollision(const DynamicObject& obj1, const DynamicObject& o
     return dist * (v1 / v_rel);
 }
 
-meter_t getDistanceToCollision_iterative(DynamicObject obj1, DynamicObject obj2, const meter_t stopDistance, const millisecond_t step) {
-    return getDistanceToFirstCollision_iterative(obj1, { obj2 }, stopDistance, step);
-}
-
-meter_t getDistanceToFirstCollision_iterative(DynamicObject obj1, std::vector<DynamicObject> objects, const meter_t stopDistance, const millisecond_t step) {
+millisecond_t getTimeToFirstCollision_iterative(DynamicObject obj1, std::vector<DynamicObject> objects, const millisecond_t timeInterval, const millisecond_t step) {
     
     const Point2m startPos = obj1.odom.pose.pos;
+    millisecond_t time(0);
 
     diff diff1(obj1.odom.twist.speed, obj1.odom.twist.ang_vel, step);
 
@@ -73,15 +66,15 @@ meter_t getDistanceToFirstCollision_iterative(DynamicObject obj1, std::vector<Dy
         diffs.emplace_back(obj.odom.twist.speed, obj.odom.twist.ang_vel, step);
     }
 
-    meter_t dist1 = meter_t(0);
     bool collision = false;
 
-    while (!collision && dist1 < stopDistance) {
+    while (!collision && time < timeInterval) {
 
-        diff1.apply(obj1.odom, &dist1);
+        time += step;
+        diff1.apply(obj1.odom);
 
         for (size_t i = 0; i < objects.size(); ++i) {
-            diffs[i].apply(objects[i].odom, nullptr);
+            diffs[i].apply(objects[i].odom);
         }
 
         for(const DynamicObject& obj : objects) {
@@ -92,11 +85,7 @@ meter_t getDistanceToFirstCollision_iterative(DynamicObject obj1, std::vector<Dy
         }
     }
 
-    if (!collision) {
-        dist1 = meter_t(std::numeric_limits<float64_t>::infinity());
-    }
-
-    return dist1;
+    return time;
 }
 
 } // namespace bcr

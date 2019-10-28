@@ -17,69 +17,44 @@ DynamicWindow::DynamicWindow(
     , maxDeltaWheelAngle(maxDeltaWheelAngle)
     , wRes_speed(wRes_speed)
     , wRes_wheelAngle(wRes_wheelAngle)
-    , wMin_speed(-maxDeltaSpeed)
-    , wMax_speed(maxDeltaSpeed)
-    , wMin_wheelAngle(-maxDeltaWheelAngle)
-    , wMax_wheelAngle(maxDeltaWheelAngle) {
+    , wCenter_speed(0)
+    , wCenter_wheelAngle(0) {
 
-    this->window.resize(2 * maxDeltaSpeed / wRes_speed);
+    const size_t size_speed = 2 * static_cast<size_t>(maxDeltaSpeed / wRes_speed) + 1;
+    const size_t size_wheelAngle = 2 * static_cast<size_t>(maxDeltaWheelAngle / wRes_wheelAngle) + 1;
+
+    this->window.resize(size_speed);
     for (std::vector<VelocityObstacle>& col : this->window) {
-        col.resize(2 * maxDeltaWheelAngle / wRes_wheelAngle);
+        col.resize(size_wheelAngle);
     }
+
+    this->wCenter_speedIdx = size_speed / 2;
+    this->wCenter_wheelAngleIdx = size_wheelAngle / 2;
 
     this->update(m_per_sec_t(0), radian_t(0));
 }
 
 void DynamicWindow::update(m_per_sec_t actualSpeed, radian_t actualWheelAngle) {
-    this->wMin_speed = actualSpeed - this->maxDeltaSpeed;
-    this->wMax_speed = actualSpeed + this->maxDeltaSpeed;
+    this->wCenter_speed = actualSpeed;
+    this->wCenter_wheelAngle = actualWheelAngle;
 
-    this->wMin_wheelAngle = actualWheelAngle - this->maxDeltaWheelAngle;
-    this->wMax_wheelAngle = actualWheelAngle + this->maxDeltaWheelAngle;
+    const size_t rowIdx_center = (this->window.size() + 1) / 2;
+    const size_t colIdx_center = (this->window[0].size() + 1) / 2;
 
     for (size_t r = 0; r < this->window.size(); ++r) {
         std::vector<VelocityObstacle>& col = this->window[r];
         for (size_t c = 0; c < col.size(); ++c) {
-            std::pair<m_per_sec_t, radian_t> dynamics = this->getDynamics(r, c);
+            const m_per_sec_t speed = this->wCenter_speed + (static_cast<int32_t>(r) - static_cast<int32_t>(this->wCenter_speedIdx)) * this->wRes_speed;
+            const radian_t wheelAngle = this->wCenter_wheelAngle + (static_cast<int32_t>(c) - static_cast<int32_t>(this->wCenter_wheelAngleIdx)) * this->wRes_wheelAngle;
 
             col[c] = { 
-                dynamics.first, dynamics.second,
-                bcr::isBtw(dynamics.first, this->maxSpeedBwd, this->maxSpeedFwd) &&
-                bcr::isBtw(dynamics.second, -this->maxWheelAngle, this->maxWheelAngle)
+                speed, wheelAngle,
+                bcr::isBtw(speed, this->maxSpeedBwd - m_per_sec_t(0.0001), this->maxSpeedFwd + m_per_sec_t(0.00001)) &&
+                bcr::isBtw(wheelAngle, -this->maxWheelAngle - radian_t(0.00001), this->maxWheelAngle + radian_t(0.00001)),
+                0.0f, 0.0f, 0.0f // factors
             };
         }
     }
-}
-
-bool DynamicWindow::isAvailable(m_per_sec_t speed, radian_t wheelAngle) const {
-    bool available = false;
-
-    if (bcr::isBtw(speed, this->maxSpeedBwd, this->maxSpeedFwd) &&
-        bcr::isBtw(wheelAngle, -this->maxWheelAngle, this->maxWheelAngle)) {
-
-        std::pair<size_t, size_t> indexes = this->getIndexes(speed, wheelAngle);
-        if (bcr::isBtw(indexes.first, 0, this->window.size() - 1)) {
-
-            const std::vector<VelocityObstacle>& col = this->window[indexes.first];
-            if (bcr::isBtw(indexes.second, 0, col.size() - 1)) {
-                available = col[indexes.second].available;
-            }
-        }
-    }
-    return available;
-}
-
-std::pair<size_t, size_t> DynamicWindow::getIndexes(m_per_sec_t speed, radian_t wheelAngle) const {
-    const float32_t idxSpeed = bcr::isBtw(speed, this->wMin_speed, this->wMax_speed) ? bcr::map(speed, this->wMin_speed, this->wMax_speed, 0.0f, static_cast<float32_t>(window.size() - 1)) : -1.0f;
-    const float32_t idxWheelAngle = bcr::isBtw(wheelAngle, this->wMin_wheelAngle, this->wMax_wheelAngle) ? bcr::map(wheelAngle, this->wMin_wheelAngle, this->wMax_wheelAngle, 0.0f, static_cast<float32_t>(window[0].size() - 1)) : -1.0f;
-
-    return idxWheelAngle >= 0.0f && idxSpeed >= 0.0f ?
-        std::pair<size_t, size_t> { static_cast<size_t>(bcr::round(idxSpeed)), static_cast<size_t>(bcr::round(idxWheelAngle)) } :
-        std::pair<size_t, size_t> { size_t(-1), size_t(-1) };
-}
-
-std::pair<m_per_sec_t, radian_t> DynamicWindow::getDynamics(size_t rowIdx, size_t colIdx) const {
-    return { this->wMin_speed + this->wRes_speed * rowIdx, this->wMin_wheelAngle + this->wRes_wheelAngle * colIdx };
 }
 
 } // namespace bcr

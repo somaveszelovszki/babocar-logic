@@ -142,8 +142,8 @@ add_library(${PROJECT_NAME}
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-add_executable(vo_map_builder src/vo_map_builder.cpp)
-target_link_libraries(vo_map_builder ${catkin_LIBRARIES} local_planner)
+add_executable(local_obstacle_avoidance src/local_obstacle_avoidance.cpp)
+target_link_libraries(local_obstacle_avoidance ${catkin_LIBRARIES} local_planner)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -203,6 +203,7 @@ target_link_libraries(vo_map_builder ${catkin_LIBRARIES} local_planner)
 catkin_add_gtest(${PROJECT_NAME}-test
   test/run_tests.cpp
   test/collision.cpp
+  test/trajectory.cpp
 )
 if(TARGET ${PROJECT_NAME}-test)
   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
