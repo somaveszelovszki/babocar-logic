@@ -37,6 +37,8 @@ public:
 
     uint32_t numObstacleNeighbours(const Point2<uint32_t>& point, uint32_t delta) const;
 
+    void filter(void);
+
     nav_msgs::OccupancyGrid grid;   // TODO use only one implementation (this or own)
 
 private:

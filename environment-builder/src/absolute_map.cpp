@@ -160,3 +160,26 @@ uint32_t AbsoluteMap::numObstacleNeighbours(const Point2<uint32_t>& point, uint3
 
     return count;
 }
+
+void AbsoluteMap::filter(void) {
+    static constexpr uint32_t FILTER_RADIUS = 1;
+
+    for (uint32_t x = FILTER_RADIUS; x < this->row_size_ - FILTER_RADIUS; ++x) {
+        for (uint32_t y = FILTER_RADIUS; y < this->row_size_ - FILTER_RADIUS; ++y) {
+            if (this->get({ x, y }) == CellState::OCCUPIED) {
+                bool found = false;
+                for (uint32_t xx = x - FILTER_RADIUS; xx < x + FILTER_RADIUS; ++xx) {
+                    for (uint32_t yy = y - FILTER_RADIUS; yy < y + FILTER_RADIUS; ++yy) {
+                        if ((x != xx || y != yy) && this->get({ xx, yy }) == CellState::OCCUPIED) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found) {
+                    this->set({ x, y }, CellState::UNKNOWN);
+                }
+            }
+        }
+    }
+}
