@@ -23,9 +23,7 @@
 #include <vector>
 #include <algorithm>
 
-//#define SCAN_TOPIC "scan"
-#define SCAN_TOPIC "lidar_scan"
-#define SCAN_TF_FRAME "scanner"
+#define SINGLE_LIDAR true
 
 using namespace bcr;
 
@@ -49,7 +47,7 @@ std::unique_ptr<DecomposerNode> node = nullptr;
 nav_msgs::Odometry carOdom_ros;
 Odometry carOdom;
 
-static constexpr uint32_t MAX_SCAN_SAMPLES = 400;
+constexpr uint32_t MAX_SCAN_SAMPLES = 400;
 
 Pose transformPose(const std::string& from_frame, const std::string& to_frame, const Pose& p, const ros::Time& time = ros::Time()) {
 
@@ -154,7 +152,12 @@ struct LaserMeas {
     }
 
     meter_t getDistanceInDirection(const Point2m& odomPoint) const {
-        const Point2m lidarPoint = transformPoint("odom", SCAN_TF_FRAME, odomPoint, this->scan->header.stamp);
+#if SINGLE_LIDAR
+        const Point2m lidarPoint = transformPoint("odom", "scanner", odomPoint, this->scan->header.stamp);
+#else
+        const Point2m lidarPoint = transformPoint("odom", "front_scanner", odomPoint, this->scan->header.stamp);//.average(transformPoint("odom", "rear_scanner", odomPoint, this->scan->header.stamp));
+#endif
+
         return this->getDistance(atan2(lidarPoint.Y, lidarPoint.X));
     }
 };
@@ -188,8 +191,8 @@ struct Group {
     }
 };
 
-static constexpr uint32_t NUM_PREV_COMPARE = 5;
-static constexpr uint32_t NUM_SPEED_FILTER = 5;
+constexpr uint32_t NUM_PREV_COMPARE = 5;
+constexpr uint32_t NUM_SPEED_FILTER = 5;
 
 ring_buffer<LaserMeas, NUM_PREV_COMPARE + 1> prevScans;
 ring_buffer<std::vector<Group>, NUM_PREV_COMPARE + 1> prevGroupsList;
@@ -280,25 +283,6 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
 
                 groups.push_back(Group());
                 currentGroup = groups.end() - 1;
-            } else {
-                // if (p.state != AbsPoint::State::DYNAMIC_POS) {
-                //     const radian_t prev_angle = meas.odom.pose.pos.getAngle(p_prev->absOdomPos);
-                //     const radian_t angle = meas.odom.pose.pos.getAngle(p.absOdomPos);
-
-                //     bool found = false;
-                //     for (radian_t ang : negDiffAngles) {
-                //         if (bcr::isBtw(ang, angle, prev_angle)) {
-                //             found = true;
-                //             break;                        
-                //         }
-                //     }
-
-                //     if (found) {
-                //         ROS_INFO("forced new group");
-                //         groups.push_back(Group());
-                //         currentGroup = groups.end() - 1;
-                //     }
-                // }
             }
 
             if (currentGroup != groups.end()) {
@@ -469,7 +453,13 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         // filters out too near objects (false detection)
         if (dist > centimeter_t(10)) {
             const Point2m lidarPoint(dist * bcr::cos(angle), dist * bcr::sin(angle));
-            const Point2m absOdomPoint = transformPoint(SCAN_TF_FRAME, "odom", lidarPoint);
+
+#if SINGLE_LIDAR
+            const Point2m absOdomPoint = transformPoint("scanner", "odom", lidarPoint);
+#else
+            const Point2m absOdomPoint = transformPoint("front_scanner", "odom", lidarPoint);//.average(transformPoint("rear_scanner", "odom", lidarPoint));
+#endif
+
             const Point2m absMapPoint = transformPoint("odom", "map", absOdomPoint);
             //meas.points.push_back(absPoint);
             const Point2i absMapIndexes = absMap.getNearestIndexes(absMapPoint);
@@ -698,30 +688,21 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         for (const AbsPoint& p : meas.points) {
             if (p.state == AbsPoint::State::DYNAMIC_POS) {
                 staticScan.ranges[p.idx] = std::numeric_limits<float32_t>::infinity();
-                //absMap.setRay(meas.odom.pose.pos, meas.odom.pose.pos.getAngle(p.absMapPos));
             } else if (p.state == AbsPoint::State::STATIC) {
                 absMap.setRay(meas.odom.pose.pos, p.absMapPos);
             }
         }
 
-
-
-
         sendObstacles(filteredGroups);
         diffGridPub->publish(diffGrid);
         staticGridPub->publish(absMap.grid);
         staticScanPub->publish(staticScan);
-
-        //KMeans massCenters(meas.points);
-        //uint32_t numObstacles = 5;  // TODO
-        //const std::vector<KMeans::Group> groups = massCenters.run(numObstacles);
     }
 }
 
 void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
     carOdom_ros = *odom;
     carOdom = bcr::ros_convert(*odom);
-    //ROS_INFO("Car pos: [%f, %f] m, orientation: %f deg", static_cast<meter_t>(carOdom.pose.pos.X).get(), static_cast<meter_t>(carOdom.pose.pos.Y).get(), static_cast<radian_t>(carOdom.pose.angle).get());
 }
 
 } // namespace
@@ -731,7 +712,7 @@ int main(int argc, char **argv)
     static const std::string NODE_NAME = "environment_builder__decomposer";
     ros::init(argc, argv, NODE_NAME);
     node.reset(new DecomposerNode(NODE_NAME));
-    ros::Subscriber scanSub = node->subscribe<sensor_msgs::LaserScan>(SCAN_TOPIC, 1, scanCallback);
+    ros::Subscriber scanSub = node->subscribe<sensor_msgs::LaserScan>("lidar_scan", 1, scanCallback);
     ros::Subscriber odomSub = node->subscribe<nav_msgs::Odometry>("odom", 1, odomCallback);
 
     ros::Publisher diffGridPublisher = node->advertise<nav_msgs::OccupancyGrid>("diff_grid", 10);
