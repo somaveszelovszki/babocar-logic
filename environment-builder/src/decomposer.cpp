@@ -108,7 +108,6 @@ struct AbsPoint {
     };
 
     int32_t idx;
-    Point2m absOdomPos;
     Point2m absMapPos;
     Point2<uint32_t> mapGridPos;
     State state;
@@ -223,10 +222,10 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
 
         do {
             AbsPoint& p = meas.points[i];
-            const meter_t eps = bcr::clamp(meter_t(p.absOdomPos.length() * ray_angle_incr * 4), meter_t(0.2f), meter_t(0.4f));
+            const meter_t eps = bcr::clamp(meter_t(p.absMapPos.length() * ray_angle_incr * 4), meter_t(0.2f), meter_t(0.4f));
 
             // if point is far from its neighbour, we start a new group (new object)
-            if (p.absOdomPos.distance(p_prev->absOdomPos) > eps) {
+            if (p.absMapPos.distance(p_prev->absMapPos) > eps) {
                 // saves index of the first point thas has already been added to a group
                 if (currentGroup == groups.end()) {
                     startIdx = i;
@@ -248,7 +247,7 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
                     static constexpr meter_t MAX_OBSTACLE_LENGTH_AFTER_DYNAMIC_POINT = meter_t(1.0f);
 
                     if (beginningStaticPoints) {
-                        const meter_t distBeforeFirstDynamic = currentGroup->points[0]->absOdomPos.distance((*firstDynamic)->absOdomPos);
+                        const meter_t distBeforeFirstDynamic = currentGroup->points[0]->absMapPos.distance((*firstDynamic)->absMapPos);
                         if (distBeforeFirstDynamic > MAX_OBSTACLE_LENGTH_AFTER_DYNAMIC_POINT) {
                             // separates starting static points from middle dynamic points
                             // in order to prevent wall from being added to a moving object
@@ -262,7 +261,7 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
                     }
 
                     if (trailingStaticPoints) {
-                        const meter_t distAfterLastDynamic = currentGroup->points.back()->absOdomPos.distance((*(firstStaticAfterLastDynamic - 1))->absOdomPos);
+                        const meter_t distAfterLastDynamic = currentGroup->points.back()->absMapPos.distance((*(firstStaticAfterLastDynamic - 1))->absMapPos);
                         if (distAfterLastDynamic > MAX_OBSTACLE_LENGTH_AFTER_DYNAMIC_POINT) {
                             // separates trailing static points from middle dynamic points
                             // in order to prevent wall from being added to a moving object
@@ -310,12 +309,12 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
                     if (it->isMoving()) {
                         for (AbsPoint *p : it->points) {
                             p->state = AbsPoint::State::DYNAMIC_POS;
-                            it->center += p->absOdomPos;
+                            it->center += p->absMapPos;
                         }
                         it->center /= it->points.size();
 
                         for (AbsPoint *p : it->points) {
-                            const meter_t dist = p->absOdomPos.distance(it->center);
+                            const meter_t dist = p->absMapPos.distance(it->center);
                             if (dist > it->radius) {
                                 it->radius = dist;
                             }
@@ -455,15 +454,14 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
             const Point2m lidarPoint(dist * bcr::cos(angle), dist * bcr::sin(angle));
 
 #if SINGLE_LIDAR
-            const Point2m absOdomPoint = transformPoint("scanner", "odom", lidarPoint);
+            const Point2m absMapPoint = transformPoint("scanner", "map", lidarPoint);
 #else
-            const Point2m absOdomPoint = transformPoint("front_scanner", "odom", lidarPoint);//.average(transformPoint("rear_scanner", "odom", lidarPoint));
+            const Point2m absMapPoint = transformPoint("front_scanner", "map", lidarPoint);//.average(transformPoint("rear_scanner", "map", lidarPoint));
 #endif
 
-            const Point2m absMapPoint = transformPoint("odom", "map", absOdomPoint);
             //meas.points.push_back(absPoint);
             const Point2i absMapIndexes = absMap.getNearestIndexes(absMapPoint);
-            meas.points.push_back({ i, absOdomPoint, absMapPoint, absMapIndexes, AbsPoint::State::STATIC });
+            meas.points.push_back({ i, absMapPoint, absMapIndexes, AbsPoint::State::STATIC });
             //absMap.set(absMapPoint, AbsoluteMap::CellState::OCCUPIED);
         }
     }
@@ -490,9 +488,9 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                 // if point is not found in one of the previous measurements, it may be a dynamic point
                 // but first checks if current distance is smaller than the previous, otherwise it is not a moving object that we have detected,
                 // but the wall behind an object that is moving away
-                if (std::find_if(prev.points.begin(), prev.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absOdomPos.distance(prevPoint.absOdomPos) < eps; }) == prev.points.end()) {
-                    const meter_t prev_dist = prev.getDistanceInDirection(p.absOdomPos);
-                    //const radian_t prev_angle = prev.odom.pose.pos.getAngle(p.absOdomPos) - prev.odom.pose.angle;
+                if (std::find_if(prev.points.begin(), prev.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absMapPos.distance(prevPoint.absMapPos) < eps; }) == prev.points.end()) {
+                    const meter_t prev_dist = prev.getDistanceInDirection(p.absMapPos);
+                    //const radian_t prev_angle = prev.odom.pose.pos.getAngle(p.absMapPos) - prev.odom.pose.angle;
                     //const meter_t prev_dist = prev.getDistance(prev_angle);
                     //const Point2m prevAbsPoint = rayDistToAbsPoint(prev, prev_angle, prev_dist);
 
@@ -525,19 +523,19 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
                 // if yes, it means point is a static point
                 // if no, then dynamic
 
-                const meter_t eps = p.absOdomPos.length() * scan->angle_increment / 4;
+                const meter_t eps = p.absMapPos.length() * scan->angle_increment / 4;
 
                 // if point is not found in one of the previous measurements or the current measurement, it may be a negative dynamic point
                 // but first checks if distance is smaller than the other distances, otherwise it is not a moving object that we have detected,
                 // but the wall behind an object that is moving away
-                if (std::find_if(m.points.begin(), m.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absOdomPos.distance(prevPoint.absOdomPos) < eps; }) == m.points.end()) {
+                if (std::find_if(m.points.begin(), m.points.end(), [&p, eps](const AbsPoint& prevPoint) { return p.absMapPos.distance(prevPoint.absMapPos) < eps; }) == m.points.end()) {
                     const meter_t dist = meter_t(prevMeas.scan->ranges[p.idx]);
-                    const meter_t other_dist = m.getDistanceInDirection(p.absOdomPos);
+                    const meter_t other_dist = m.getDistanceInDirection(p.absMapPos);
 
                     //ROS_INFO("possible diff point: %d: (%d, %d)", p.idx, p.mapGridPos.X, p.mapGridPos.Y);
 
                     if (other_dist < dist + centimeter_t(20)) {
-                        const radian_t current_angle = meas.odom.pose.pos.getAngle(p.absOdomPos);
+                        const radian_t current_angle = meas.odom.pose.pos.getAngle(p.absMapPos);
                         negDiffAngles.push_back(current_angle);
                         //ROS_INFO("negDiffAngle: %f deg", static_cast<degree_t>(current_angle).get());
                         //diffGrid.data[p.mapGridPos.Y * diffGrid.info.width + p.mapGridPos.X] = 100;
