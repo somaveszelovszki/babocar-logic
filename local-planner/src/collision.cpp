@@ -2,90 +2,92 @@
 
 #include <babocar-core/linalg.hpp>
 
+#include <stdexcept>
+
 namespace bcr {
 
-struct diff {
-    millisecond_t step;
-    meter_t dist;
-    radian_t angle_per_2;
-    float64_t angle_per_2_sine;
-    float64_t angle_per_2_cosine;
-
-    diff(const Point2mps& speed, rad_per_sec_t ang_vel, millisecond_t step)
-        : step(step)
-        , dist(speed.length() * step)
-        , angle_per_2(ang_vel * step / 2)
-        , angle_per_2_sine(bcr::sin(angle_per_2))
-        , angle_per_2_cosine(bcr::cos(angle_per_2)) {}
-
-    void apply(Odometry& odom) {
-        odom.twist.speed.rotate(this->angle_per_2_sine, this->angle_per_2_cosine);
-        odom.pose.pos += odom.twist.speed * this->step;
-        odom.twist.speed.rotate(this->angle_per_2_sine, this->angle_per_2_cosine);
-    }
-};
-
-meter_t getDistanceToCollision(const DynamicObject& obj1, const DynamicObject& obj2) {
-
-    const Point2m relativePosDiff = obj2.odom.pose.pos - obj1.odom.pose.pos;
-    const Point2<m_per_sec_t> relativeSpeed = obj1.odom.twist.speed - obj2.odom.twist.speed;
-    const Line2d relativeMovementLine(relativeSpeed.Y / relativeSpeed.X, -1.0, 0.0); // y = (vy / vx) * x
-
-    const std::pair<Point2d, Point2d> intersections = bcr::lineCircle_intersection(
-        relativeMovementLine,
-        Point2d(relativePosDiff.X.get(), relativePosDiff.Y.get()),
-        static_cast<float64_t>(static_cast<meter_t>(obj1.radius + obj2.radius).get())
-    );
-
-    meter_t dist = meter_t(std::numeric_limits<float64_t>::infinity());
-
-    if (!std::isnan(intersections.first.X)) {
-        dist = meter_t(bcr::pythag(intersections.first.X, intersections.first.Y));
-    }
-
-    if (!std::isnan(intersections.second.X)) {
-        dist = bcr::min(dist, meter_t(bcr::pythag(intersections.second.X, intersections.second.Y)));
-    }
-
-    const m_per_sec_t v1 = obj1.odom.twist.speed.length();
-    const m_per_sec_t v_rel = bcr::pythag(relativeSpeed.X, relativeSpeed.Y);
-
-    return dist * (v1 / v_rel);
-}
-
-millisecond_t getTimeToFirstCollision_iterative(DynamicObject obj1, std::vector<DynamicObject> objects, const millisecond_t timeInterval, const millisecond_t step) {
+millisecond_t getTimeToFirstCollision_iterative(
+    DynamicObject obj, const std::vector<StaticObject>& staticObjects, const std::vector<ObjectTrajectory>& trajectories, const millisecond_t timeInterval, const millisecond_t step) {
     
-    const Point2m startPos = obj1.odom.pose.pos;
-    millisecond_t time(0);
+    const m_per_sec_t speed = obj.odom.twist.speed.length();
+    millisecond_t staticCollisionTime = timeInterval;
 
-    diff diff1(obj1.odom.twist.speed, obj1.odom.twist.ang_vel, step);
+    if (staticObjects.size() > 0) {
+        if (isZero(obj.odom.twist.ang_vel)) { // straight
+            const Line2d line(Point2d(obj.odom.pose.pos.X.get(), obj.odom.pose.pos.Y.get()), obj.odom.pose.angle);
 
-    std::vector<diff> diffs;
-    diffs.reserve(objects.size());
-    for (const DynamicObject& obj : objects) {
-        diffs.emplace_back(obj.odom.twist.speed, obj.odom.twist.ang_vel, step);
-    }
+            for (const StaticObject& o : staticObjects) {
+                const std::pair<Point2d, Point2d> intersections = lineCircle_intersection(line, { o.pos.X.get(), o.pos.Y.get() }, (obj.radius + o.radius).get());
+                if (!std::isnan(intersections.first.X) && !std::isnan(intersections.first.Y) && !std::isnan(intersections.second.X) && !std::isnan(intersections.second.Y)) {
+                    const Point2m p1 = static_cast<Point2m>(intersections.first);
+                    const Point2m p2 = static_cast<Point2m>(intersections.second);
 
-    bool collision = false;
+                    const meter_t collisionDist = min(obj.odom.pose.pos.distance(p1), obj.odom.pose.pos.distance(p2));
+                    const millisecond_t collisionTime = collisionDist / speed;
+                    if (collisionTime < staticCollisionTime) {
+                        staticCollisionTime = collisionTime;
+                    }
+                }
+            }
 
-    while (!collision && time < timeInterval) {
+        } else { // curve
+            const meter_t R = abs(speed / obj.odom.twist.ang_vel);
+            const Point2m center = obj.odom.pose.pos + Vec2m(R, meter_t(0)).rotate(obj.odom.pose.angle - PI_2);
+            const radian_t angle = center.getAngle(obj.odom.pose.pos);
 
-        time += step;
-        diff1.apply(obj1.odom);
+            for (const StaticObject& o : staticObjects) {
+                const meter_t dist = center.distance(o.pos);
+                const meter_t r = obj.radius + o.radius;
 
-        for (size_t i = 0; i < objects.size(); ++i) {
-            diffs[i].apply(objects[i].odom);
-        }
+                if (isBtw(dist, R - r, R + r)) {
+                    const radian_t collisionAngle = center.getAngle(o.pos) - angle;
+                    if (sgn(collisionAngle) == sgn(obj.odom.twist.ang_vel)) { // if signs do not match, then the main object is going to the wrong direction on the circle, they will not collide
+                        const meter_t len = R * abs(collisionAngle);
+                        const meter_t correction = r * bcr::cos(PI_2 * (abs(dist - R) / r));
 
-        for(const DynamicObject& obj : objects) {
-            if (obj1.odom.pose.pos.distance(obj.odom.pose.pos) < obj1.radius + obj.radius) {
-                collision = true;
-                break;
+                        const meter_t collisionDist = len - correction;
+                        const millisecond_t collisionTime = collisionDist / speed;
+                        if (collisionTime < staticCollisionTime) {
+                            staticCollisionTime = collisionTime;
+                        }
+                    }
+                }
             }
         }
     }
 
-    return time;
+    millisecond_t dynamicCollisionTime(0);
+
+    if (trajectories.size() > 0) {
+
+        for(const ObjectTrajectory& traj : trajectories) {
+            if (traj.step != step) {
+                throw std::runtime_error("Trajectory step must be " + std::to_string(step.get()) + "ms (current: " + std::to_string(traj.step.get()) + "ms)");
+            }
+        }
+
+        const Point2m startPos = obj.odom.pose.pos;
+        bool collision = false;
+        size_t i = 0;
+
+        while (!collision && dynamicCollisionTime < timeInterval) {
+    
+            for(const ObjectTrajectory& traj : trajectories) {
+                if (obj.odom.pose.pos.distance(traj.points[i]) < obj.radius + traj.radius) {
+                    collision = true;
+                    break;
+                }
+            }
+    
+            dynamicCollisionTime += step;
+            obj.odom.update(step);
+            ++i;
+        }
+    } else {
+        dynamicCollisionTime = timeInterval;
+    }
+
+    return min(staticCollisionTime, dynamicCollisionTime);
 }
 
 } // namespace bcr

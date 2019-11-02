@@ -5,10 +5,14 @@
 
 namespace bcr {
 
+meter_t getRadius(meter_t carFrontRearWheelAxisDist, radian_t wheelAngle) {
+    return isZero(wheelAngle) ? meter_t(std::numeric_limits<unit_storage_type>::infinity()) : carFrontRearWheelAxisDist / bcr::tan(wheelAngle);
+}
+
 rad_per_sec_t getAngularVelocity(meter_t carFrontRearWheelAxisDist, m_per_sec_t speed, radian_t wheelAngle) {
     rad_per_sec_t angVel(0);
     if (!isZero(wheelAngle)) {
-        const meter_t R = carFrontRearWheelAxisDist / bcr::tan(wheelAngle);
+        const meter_t R = getRadius(carFrontRearWheelAxisDist, wheelAngle);
         angVel = speed / R;
     }
     return angVel;
@@ -49,6 +53,25 @@ radian_t getTrajectoryWheelAngle(meter_t carFrontRearWheelAxisDist, const Point2
     }
 
     return wheelAngle;
+}
+
+ObjectTrajectory getTrajectory(const DynamicObject& obj, const millisecond_t timeInterval, const millisecond_t step) {
+    ObjectTrajectory traj;
+    traj.radius = obj.radius;
+    traj.step = step;
+
+    traj.points.reserve(static_cast<size_t>(timeInterval / step) + 1);
+
+    Odometry odom = obj.odom;
+    millisecond_t time = millisecond_t(0);
+
+    while (time < timeInterval) {
+        traj.points.push_back(odom.pose.pos);
+        odom.update(step);
+        time += step;
+    }
+
+    return traj;
 }
 
 } // namespace bcr

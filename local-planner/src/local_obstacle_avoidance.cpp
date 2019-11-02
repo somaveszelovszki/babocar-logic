@@ -51,7 +51,7 @@ constexpr m_per_sec_t   DYNAMIC_WINDOW_SPEED_RESOLUTION       = m_per_sec_t(0.05
 constexpr radian_t      DYNAMIC_WINDOW_WHEEL_ANGLE_RESOLUTION = degree_t(4);
 
 constexpr meter_t       MAX_OBSTACLE_DISTANCE                 = meter_t(4);
-constexpr millisecond_t COLLISION_CHECK_TIME_STEP             = millisecond_t(10);
+constexpr millisecond_t COLLISION_CHECK_TIME_STEP             = millisecond_t(100);
 constexpr meter_t       MIN_KEPT_DISTANCE                     = centimeter_t(10);
 
 std::unique_ptr<VoMapBuilderNode> node = nullptr;
@@ -82,7 +82,7 @@ int32_t steer_out = 0;
 int32_t motor_in = 0;
 int32_t motor_out = 0;
 
-std::vector<DynamicObject> staticObjects;
+std::vector<StaticObject> staticObjects;
 
 nanosecond_t rosTimeDiff(const ros::Time& t1, const ros::Time& t2) {
     return nanosecond_t((t1 - t2).toNSec());
@@ -188,13 +188,13 @@ void staticGridCallback(const nav_msgs::OccupancyGrid::ConstPtr& staticGrid) {
             };
 
             if (absPoint.distance(car.odom.pose.pos) < MAX_OBSTACLE_DISTANCE) {
-                staticObjects.push_back({ centimeter_t(1), { Pose { absPoint, radian_t(0) }, Twist { { m_per_sec_t(0), m_per_sec_t(0) }, rad_per_sec_t(0) } } });
+                staticObjects.push_back({ centimeter_t(1), absPoint });
             }
         }
     }
 }
 
-void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dynamicObjects) {
+void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dynamicObjectArray) {
 
     car.odom.update(rosTimeDiff(ros::Time::now(), carLastUpdateTime));
     carLastUpdateTime = ros::Time::now();
@@ -205,22 +205,35 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
     const m_per_sec_t desiredSpeed = bcr::map(motor_in, -500, 500, m_per_sec_t(-1), m_per_sec_t(1));
     const m_per_sec_t actualSpeed = bcr::map(motor_out, -500, 500, m_per_sec_t(-1), m_per_sec_t(1));
 
-    std::vector<DynamicObject> objects = staticObjects;
-    objects.reserve(objects.size() + dynamicObjects->objects.size());
+    std::vector<ObjectTrajectory> dynamicObjectTrajectories;
+    dynamicObjectTrajectories.reserve(dynamicObjectArray->objects.size());
+
+    window.update(actualSpeed, actualWheelAngle);
+
+    millisecond_t maxStopTime = millisecond_t(0);
+
+    for (std::vector<VelocityObstacle>& vos : window.getWindow()) {
+        for (VelocityObstacle& vo : vos) {
+            if (vo.available) {
+                const millisecond_t stopTime = abs(vo.speed) / MAX_ACCELERATION;
+                if (stopTime > maxStopTime) {
+                    maxStopTime = stopTime;
+                }
+            }
+        }
+    }
 
     ROS_INFO("----------------------------------------------------");
-    for (const environment_builder::DynamicObject& o : dynamicObjects->objects) {
+    for (const environment_builder::DynamicObject& o : dynamicObjectArray->objects) {
         DynamicObject obj = bcr::ros_convert(o);
         if (obj.odom.pose.pos.distance(car.odom.pose.pos) < MAX_OBSTACLE_DISTANCE) {
-            objects.push_back(obj);
+            dynamicObjectTrajectories.push_back(getTrajectory(obj, maxStopTime, COLLISION_CHECK_TIME_STEP));
         }
     }
 
     ROS_INFO("Speed: %f (desired: %f) m/s | wheel angle: %f (desired: %f) deg",
         actualSpeed.get(), desiredSpeed.get(),
         static_cast<degree_t>(actualWheelAngle).get(), static_cast<degree_t>(desiredWheelAngle).get());
-
-    window.update(actualSpeed, actualWheelAngle);
 
     for (std::vector<VelocityObstacle>& vos : window.getWindow()) {
         for (VelocityObstacle& vo : vos) {
@@ -233,7 +246,7 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
 
                 const millisecond_t stopTime = abs(vo.speed) / MAX_ACCELERATION;
                 const millisecond_t timeInterval = bcr::max(2 * stopTime, millisecond_t(1000));
-                const millisecond_t collisionTime = bcr::getTimeToFirstCollision_iterative(c, objects, timeInterval, COLLISION_CHECK_TIME_STEP);
+                const millisecond_t collisionTime = bcr::getTimeToFirstCollision_iterative(c, staticObjects, dynamicObjectTrajectories, timeInterval, COLLISION_CHECK_TIME_STEP);
 
                 vo.safetyFactor    = bcr::map(collisionTime, millisecond_t(0), timeInterval, 0.0f, 1.0f);
                 vo.directionFactor = bcr::map(abs(vo.wheelAngle - desiredWheelAngle), radian_t(0), 2 * MAX_WHEEL_ANGLE, 1.0f, 0.0f);

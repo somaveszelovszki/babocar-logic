@@ -1,13 +1,13 @@
 #pragma once
 
-#include <environment-builder/dynamic_object.hpp>
+#include <environment-builder/static_object.hpp>
+#include "trajectory.hpp"
 
 #include <vector>
 
 namespace bcr {
 
-meter_t getDistanceToCollision(const DynamicObject& obj1, const DynamicObject& obj2);
-
-millisecond_t getTimeToFirstCollision_iterative(DynamicObject obj1, std::vector<DynamicObject> objects, const millisecond_t timeInterval, const millisecond_t step);
+millisecond_t getTimeToFirstCollision_iterative(
+    DynamicObject obj, const std::vector<StaticObject>& staticObjects, const std::vector<ObjectTrajectory>& trajectories, const millisecond_t timeInterval, const millisecond_t step);
 
 } // namespace bcr
