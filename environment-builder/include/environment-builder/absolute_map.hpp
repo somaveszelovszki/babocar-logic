@@ -39,6 +39,10 @@ public:
 
     void filter(void);
 
+    size_t getWidth(void) const { return this->row_size_; }
+    size_t getHeight(void) const { return this->row_size_; }
+    float32_t getResolution(void) const { return this->resolution_.get(); }
+
     nav_msgs::OccupancyGrid grid;   // TODO use only one implementation (this or own)
 
 private:

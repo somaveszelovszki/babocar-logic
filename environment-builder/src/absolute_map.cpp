@@ -8,9 +8,9 @@
 using namespace bcr;
 
 void AbsoluteMap::initialize(meter_t _size, meter_t _resolution) {
-    this->size_ = _size;
     this->resolution_ = _resolution;
-    this->row_size_ = _size / _resolution;
+    this->row_size_ = bcr::round(_size / _resolution);
+    this->size_ = this->row_size_ * this->resolution_;
 
     this->cells.resize(this->row_size_ * this->row_size_, CellState::UNKNOWN);
     this->tempCells.resize(this->row_size_ * this->row_size_, CellState::UNKNOWN);
@@ -132,8 +132,8 @@ Point2<uint32_t> AbsoluteMap::getNearestIndexes(const Point2m& point) const {
     const Point2m insidePoint = relPoint / bcr::max(1.0f, bcr::max(rateX, rateY));
 
     return { 
-        bcr::clamp(this->row_size_ / 2 + bcr::round(insidePoint.X / this->resolution_), 0u, this->row_size_ - 1u),
-        bcr::clamp(this->row_size_ / 2 + bcr::round(insidePoint.Y / this->resolution_), 0u, this->row_size_ - 1u)
+        bcr::clamp(static_cast<uint32_t>(bcr::round((this->row_size_ - 1) / 2.0 + insidePoint.X / this->resolution_)), 0u, this->row_size_ - 1u),
+        bcr::clamp(static_cast<uint32_t>(bcr::round((this->row_size_ - 1) / 2.0 + insidePoint.Y / this->resolution_)), 0u, this->row_size_ - 1u)
     };
 }
 
