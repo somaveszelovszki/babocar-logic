@@ -6,14 +6,22 @@
 namespace bcr {
 
 meter_t getRadius(meter_t carFrontRearWheelAxisDist, radian_t wheelAngle) {
-    return isZero(wheelAngle) ? meter_t(std::numeric_limits<unit_storage_type>::infinity()) : carFrontRearWheelAxisDist / bcr::tan(wheelAngle);
+    return isZero(wheelAngle) ? meter_t(std::numeric_limits<unit_storage_type>::infinity()) : carFrontRearWheelAxisDist / -bcr::tan(wheelAngle);
+}
+
+meter_t getRadius(m_per_sec_t speed, rad_per_sec_t angVel) {
+    return speed / -angVel;
+}
+
+Sign getSpeedSign(const DynamicObject& obj) {
+    return eq(obj.odom.twist.speed.getAngle(), obj.odom.pose.angle, PI_2) ? Sign::POSITIVE : Sign::NEGATIVE;
 }
 
 rad_per_sec_t getAngularVelocity(meter_t carFrontRearWheelAxisDist, m_per_sec_t speed, radian_t wheelAngle) {
     rad_per_sec_t angVel(0);
     if (!isZero(wheelAngle)) {
         const meter_t R = getRadius(carFrontRearWheelAxisDist, wheelAngle);
-        angVel = speed / R;
+        angVel = speed / -R;
     }
     return angVel;
 }
@@ -21,8 +29,8 @@ rad_per_sec_t getAngularVelocity(meter_t carFrontRearWheelAxisDist, m_per_sec_t 
 radian_t getWheelAngle(meter_t carFrontRearWheelAxisDist, m_per_sec_t speed, rad_per_sec_t angVel) {
     radian_t wheelAngle(0);
     if (!isZero(angVel)) {
-        const meter_t R = speed / angVel;
-        wheelAngle = atan(carFrontRearWheelAxisDist / R);
+        const meter_t R = speed / -angVel;
+        wheelAngle = atan(carFrontRearWheelAxisDist / -R);
     }
     return wheelAngle;
 }

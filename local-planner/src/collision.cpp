@@ -9,10 +9,10 @@ namespace bcr {
 millisecond_t getTimeToFirstCollision_iterative(
     DynamicObject obj, const std::vector<StaticObject>& staticObjects, const std::vector<ObjectTrajectory>& trajectories, const millisecond_t timeInterval, const millisecond_t step) {
     
-    const m_per_sec_t speed = obj.odom.twist.speed.length();
+    const m_per_sec_t speed = getSpeedSign(obj) * obj.odom.twist.speed.length();
     millisecond_t staticCollisionTime = timeInterval;
 
-    if (staticObjects.size() > 0) {
+    if (staticObjects.size() > 0 && !isZero(speed)) {
         if (isZero(obj.odom.twist.ang_vel)) { // straight
             const Line2d line(Point2d(obj.odom.pose.pos.X.get(), obj.odom.pose.pos.Y.get()), obj.odom.pose.angle);
 
@@ -22,17 +22,26 @@ millisecond_t getTimeToFirstCollision_iterative(
                     const Point2m p1 = static_cast<Point2m>(intersections.first);
                     const Point2m p2 = static_cast<Point2m>(intersections.second);
 
-                    const meter_t collisionDist = min(obj.odom.pose.pos.distance(p1), obj.odom.pose.pos.distance(p2));
-                    const millisecond_t collisionTime = collisionDist / speed;
-                    if (collisionTime < staticCollisionTime) {
-                        staticCollisionTime = collisionTime;
+                    const meter_t dist1 = obj.odom.pose.pos.distance(p1);
+                    const meter_t dist2 = obj.odom.pose.pos.distance(p2);
+
+                    const Point2m collisionPoint = dist1 < dist2 ? p1 : p2;
+
+                    // if angles do not match, then the main object is going to the wrong direction on the circle, they will not collide
+                    if (eq(obj.odom.pose.pos.getAngle(collisionPoint), obj.odom.twist.speed.getAngle(), PI_2)) {
+                        const meter_t collisionDist = dist1 < dist2 ? dist1 : dist2;
+                        const millisecond_t collisionTime = collisionDist / abs(speed);
+                        if (collisionTime < staticCollisionTime) {
+                            staticCollisionTime = collisionTime;
+                        }
                     }
                 }
             }
 
         } else { // curve
-            const meter_t R = abs(speed / obj.odom.twist.ang_vel);
-            const Point2m center = obj.odom.pose.pos + Vec2m(R, meter_t(0)).rotate(obj.odom.pose.angle - PI_2);
+            const meter_t R_signed = getRadius(speed, obj.odom.twist.ang_vel);
+            const meter_t R = abs(R_signed);
+            const Point2m center = obj.odom.pose.pos + Vec2m(meter_t(0), -R_signed).rotate(obj.odom.pose.angle);
             const radian_t angle = center.getAngle(obj.odom.pose.pos);
 
             for (const StaticObject& o : staticObjects) {
@@ -40,13 +49,15 @@ millisecond_t getTimeToFirstCollision_iterative(
                 const meter_t r = obj.radius + o.radius;
 
                 if (isBtw(dist, R - r, R + r)) {
-                    const radian_t collisionAngle = center.getAngle(o.pos) - angle;
-                    if (sgn(collisionAngle) == sgn(obj.odom.twist.ang_vel)) { // if signs do not match, then the main object is going to the wrong direction on the circle, they will not collide
-                        const meter_t len = R * abs(collisionAngle);
+                    const radian_t collisionAngle = normalize360(center.getAngle(o.pos) - angle + PI) - PI;
+
+                    // if signs do not match, then the main object is going to the wrong direction on the circle, they will not collide
+                    if (sgn(collisionAngle) == sgn(obj.odom.twist.ang_vel)) {
+                        const meter_t len = abs(R * collisionAngle);
                         const meter_t correction = r * bcr::cos(PI_2 * (abs(dist - R) / r));
 
-                        const meter_t collisionDist = len - correction;
-                        const millisecond_t collisionTime = collisionDist / speed;
+                        const meter_t collisionDist = max(len - correction, meter_t(0));
+                        const millisecond_t collisionTime = collisionDist / abs(speed);
                         if (collisionTime < staticCollisionTime) {
                             staticCollisionTime = collisionTime;
                         }
@@ -70,13 +81,17 @@ millisecond_t getTimeToFirstCollision_iterative(
         bool collision = false;
         size_t i = 0;
 
-        while (!collision && dynamicCollisionTime < timeInterval) {
+        while (dynamicCollisionTime < timeInterval) {
     
             for(const ObjectTrajectory& traj : trajectories) {
-                if (obj.odom.pose.pos.distance(traj.points[i]) < obj.radius + traj.radius) {
+                if (obj.odom.pose.pos.distance(traj.points.at(i)) < obj.radius + traj.radius) {
                     collision = true;
                     break;
                 }
+            }
+
+            if (collision) {
+                break;
             }
     
             dynamicCollisionTime += step;

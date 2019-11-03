@@ -14,6 +14,10 @@ struct ObjectTrajectory {
 
 meter_t getRadius(meter_t carFrontRearWheelAxisDist, radian_t wheelAngle);
 
+meter_t getRadius(m_per_sec_t speed, rad_per_sec_t angVel);
+
+Sign getSpeedSign(const DynamicObject& obj);
+
 rad_per_sec_t getAngularVelocity(meter_t carFrontRearWheelAxisDist, m_per_sec_t speed, radian_t wheelAngle);
 
 radian_t getWheelAngle(meter_t carFrontRearWheelAxisDist, m_per_sec_t speed, rad_per_sec_t angVel);
