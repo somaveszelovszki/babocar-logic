@@ -65,7 +65,7 @@ radian_t getTrajectoryWheelAngle(meter_t carFrontRearWheelAxisDist, const Point2
 
 ObjectTrajectory getTrajectory(const DynamicObject& obj, const millisecond_t timeInterval, const millisecond_t step) {
     ObjectTrajectory traj;
-    traj.radius = obj.radius;
+    traj.radius = obj.radiuses[0].second;
     traj.step = step;
 
     traj.points.reserve(static_cast<size_t>(timeInterval / step) + 1);

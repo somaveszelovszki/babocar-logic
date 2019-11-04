@@ -9,57 +9,68 @@ namespace bcr {
 millisecond_t getTimeToFirstCollision_iterative(
     DynamicObject obj, const std::vector<StaticObject>& staticObjects, const std::vector<ObjectTrajectory>& trajectories, const millisecond_t timeInterval, const millisecond_t step) {
     
-    const m_per_sec_t speed = getSpeedSign(obj) * obj.odom.twist.speed.length();
+    const Sign speedSign = getSpeedSign(obj);
+    const m_per_sec_t speed = speedSign * obj.odom.twist.speed.length();
     millisecond_t staticCollisionTime = timeInterval;
 
     if (staticObjects.size() > 0 && !isZero(speed)) {
-        if (isZero(obj.odom.twist.ang_vel)) { // straight
-            const Line2d line(Point2d(obj.odom.pose.pos.X.get(), obj.odom.pose.pos.Y.get()), obj.odom.pose.angle);
 
-            for (const StaticObject& o : staticObjects) {
-                const std::pair<Point2d, Point2d> intersections = lineCircle_intersection(line, { o.pos.X.get(), o.pos.Y.get() }, (obj.radius + o.radius).get());
-                if (!std::isnan(intersections.first.X) && !std::isnan(intersections.first.Y) && !std::isnan(intersections.second.X) && !std::isnan(intersections.second.Y)) {
-                    const Point2m p1 = static_cast<Point2m>(intersections.first);
-                    const Point2m p2 = static_cast<Point2m>(intersections.second);
+        for (size_t r = 0; r < obj.positions.size(); ++r) {
+            //const Point2m pos = speedSign == Sign::POSITIVE ? obj.positions[obj.positions.size() - 1] : obj.positions[0];
+            //const meter_t radius = speedSign == Sign::POSITIVE ? obj.radiuses[obj.radiuses.size() - 1].second : obj.radiuses[0].second;
 
-                    const meter_t dist1 = obj.odom.pose.pos.distance(p1);
-                    const meter_t dist2 = obj.odom.pose.pos.distance(p2);
+            const Point2m pos = obj.positions[r];
+            const meter_t radius = obj.radiuses[r].second;
 
-                    const Point2m collisionPoint = dist1 < dist2 ? p1 : p2;
+            if (eq(obj.odom.twist.ang_vel, rad_per_sec_t(0), deg_per_sec_t(1))) { // straight
+                const Line2d line(Point2d(pos.X.get(), pos.Y.get()), obj.odom.pose.angle);
 
-                    // if angles do not match, then the main object is going to the wrong direction on the circle, they will not collide
-                    if (eq(obj.odom.pose.pos.getAngle(collisionPoint), obj.odom.twist.speed.getAngle(), PI_2)) {
-                        const meter_t collisionDist = dist1 < dist2 ? dist1 : dist2;
-                        const millisecond_t collisionTime = collisionDist / abs(speed);
-                        if (collisionTime < staticCollisionTime) {
-                            staticCollisionTime = collisionTime;
+                for (const StaticObject& o : staticObjects) {
+                    const std::pair<Point2d, Point2d> intersections = lineCircle_intersection(line, { o.pos.X.get(), o.pos.Y.get() }, (radius + o.radius).get());
+                    if (!std::isnan(intersections.first.X) && !std::isnan(intersections.first.Y) && !std::isnan(intersections.second.X) && !std::isnan(intersections.second.Y)) {
+                        const Point2m p1 = static_cast<Point2m>(intersections.first);
+                        const Point2m p2 = static_cast<Point2m>(intersections.second);
+    
+                        const meter_t dist1 = pos.distance(p1);
+                        const meter_t dist2 = pos.distance(p2);
+    
+                        const Point2m collisionPoint = dist1 < dist2 ? p1 : p2;
+    
+                        // if angles do not match, then the main object is going to the wrong direction on the circle, they will not collide
+                        if (eq(pos.getAngle(collisionPoint), obj.odom.twist.speed.getAngle(), PI_2)) {
+                            const meter_t collisionDist = dist1 < dist2 ? dist1 : dist2;
+                            const millisecond_t collisionTime = collisionDist / abs(speed);
+                            if (collisionTime < staticCollisionTime) {
+                                staticCollisionTime = collisionTime;
+                            }
                         }
                     }
                 }
-            }
 
-        } else { // curve
-            const meter_t R_signed = getRadius(speed, obj.odom.twist.ang_vel);
-            const meter_t R = abs(R_signed);
-            const Point2m center = obj.odom.pose.pos + Vec2m(meter_t(0), -R_signed).rotate(obj.odom.pose.angle);
-            const radian_t angle = center.getAngle(obj.odom.pose.pos);
+            } else { // curve
+                const meter_t R_signed_fromBaseLink = getRadius(speed, obj.odom.twist.ang_vel);
+                const Point2m center = obj.odom.pose.pos + Vec2m(meter_t(0), -R_signed_fromBaseLink).rotate(obj.odom.pose.angle);
 
-            for (const StaticObject& o : staticObjects) {
-                const meter_t dist = center.distance(o.pos);
-                const meter_t r = obj.radius + o.radius;
+                const meter_t R = center.distance(pos);
+                const radian_t angle = center.getAngle(pos);
 
-                if (isBtw(dist, R - r, R + r)) {
-                    const radian_t collisionAngle = normalize360(center.getAngle(o.pos) - angle + PI) - PI;
+                for (const StaticObject& o : staticObjects) {
+                    const meter_t dist = center.distance(o.pos);
+                    const meter_t radiusSum = radius + o.radius;
 
-                    // if signs do not match, then the main object is going to the wrong direction on the circle, they will not collide
-                    if (sgn(collisionAngle) == sgn(obj.odom.twist.ang_vel)) {
-                        const meter_t len = abs(R * collisionAngle);
-                        const meter_t correction = r * bcr::cos(PI_2 * (abs(dist - R) / r));
-
-                        const meter_t collisionDist = max(len - correction, meter_t(0));
-                        const millisecond_t collisionTime = collisionDist / abs(speed);
-                        if (collisionTime < staticCollisionTime) {
-                            staticCollisionTime = collisionTime;
+                    if (isBtw(dist, R - radiusSum, R + radiusSum)) {
+                        const radian_t collisionAngle = normalize360(center.getAngle(o.pos) - angle + PI) - PI;
+    
+                        // if signs do not match, then the main object is going to the wrong direction on the circle, they will not collide
+                        if (sgn(collisionAngle) == sgn(obj.odom.twist.ang_vel)) {
+                            const meter_t len = abs(R * collisionAngle);
+                            const meter_t correction = radiusSum * bcr::cos(PI_2 * (abs(dist - R) / radiusSum));
+    
+                            const meter_t collisionDist = max(len - correction, meter_t(0));
+                            const millisecond_t collisionTime = collisionDist / abs(speed);
+                            if (collisionTime < staticCollisionTime) {
+                                staticCollisionTime = collisionTime;
+                            }
                         }
                     }
                 }
@@ -84,8 +95,14 @@ millisecond_t getTimeToFirstCollision_iterative(
         while (dynamicCollisionTime < timeInterval) {
     
             for(const ObjectTrajectory& traj : trajectories) {
-                if (obj.odom.pose.pos.distance(traj.points.at(i)) < obj.radius + traj.radius) {
-                    collision = true;
+                for (size_t r = 0; r < obj.radiuses.size(); ++r) {
+                    if (obj.positions[r].distance(traj.points.at(i)) < obj.radiuses[r].second + traj.radius) {
+                        collision = true;
+                        break;
+                    }
+                }
+
+                if (collision) {
                     break;
                 }
             }
@@ -95,7 +112,7 @@ millisecond_t getTimeToFirstCollision_iterative(
             }
     
             dynamicCollisionTime += step;
-            obj.odom.update(step);
+            obj.update(step);
             ++i;
         }
     } else {
