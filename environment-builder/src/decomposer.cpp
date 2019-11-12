@@ -334,10 +334,30 @@ std::vector<Group> makeGroups(LaserMeas& meas, radian_t ray_angle_incr, const st
                 default:
                     it->updateIsMoving();
                     if (it->isMoving()) {
-                        for (AbsPoint *p : it->points) {
-                            it->center += p->absMapPos;
+                        // for (AbsPoint *p : it->points) {
+                        //     it->center += p->absMapPos;
+                        // }
+                        // it->center /= it->points.size();
+
+                        AbsPoint *p1 = nullptr;
+                        AbsPoint *p2 = nullptr;
+                        meter_t maxDist(0);
+
+                        for (uint32_t i = 0; i < it->points.size(); ++i) {
+                            AbsPoint *pi = it->points[i];
+                            for (uint32_t j = i; j < it->points.size(); ++j) {
+                                AbsPoint *pj = it->points[j];
+                                const meter_t dist = pi->absMapPos.distance(pj->absMapPos);
+                                if (dist > maxDist) {
+                                    maxDist = dist;
+                                    p1 = pi;
+                                    p2 = pj;
+                                }
+                            }
                         }
-                        it->center /= it->points.size();
+
+                        it->center = avg(p1->absMapPos, p2->absMapPos);
+                        it->radius = meter_t(0);
 
                         for (AbsPoint *p : it->points) {
                             const meter_t dist = p->absMapPos.distance(it->center);

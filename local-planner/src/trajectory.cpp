@@ -26,11 +26,15 @@ rad_per_sec_t getAngularVelocity(meter_t carFrontRearWheelAxisDist, m_per_sec_t 
     return angVel;
 }
 
+radian_t getWheelAngle(meter_t carFrontRearWheelAxisDist, meter_t radius) {
+    return isZero(radius) ? PI_2 : atan(carFrontRearWheelAxisDist / -radius);
+}
+
 radian_t getWheelAngle(meter_t carFrontRearWheelAxisDist, m_per_sec_t speed, rad_per_sec_t angVel) {
     radian_t wheelAngle(0);
     if (!isZero(angVel)) {
         const meter_t R = speed / -angVel;
-        wheelAngle = atan(carFrontRearWheelAxisDist / -R);
+        wheelAngle = getWheelAngle(carFrontRearWheelAxisDist, R);
     }
     return wheelAngle;
 }
@@ -56,8 +60,13 @@ radian_t getTrajectoryWheelAngle(meter_t carFrontRearWheelAxisDist, const Point2
     radian_t wheelAngle = radian_t::ZERO();
 
     if (!std::isinf(intersection.X) && !std::isinf(intersection.Y)) {
-        const meter_t R = currentPos.distance(static_cast<Point2m>(intersection));
-        wheelAngle = atan(carFrontRearWheelAxisDist / R);
+        const Sign rotationCenterSign = normalize360(currentPos.getAngle(destination) - orientation + PI) - PI >= radian_t(0) ? Sign::NEGATIVE : Sign::POSITIVE;
+        const meter_t R = rotationCenterSign * currentPos.distance(static_cast<Point2m>(intersection));
+        wheelAngle = getWheelAngle(carFrontRearWheelAxisDist, R);
+    }
+    else
+    {
+        wheelAngle = PI_2;
     }
 
     return wheelAngle;
