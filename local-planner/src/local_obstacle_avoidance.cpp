@@ -315,6 +315,43 @@ m_per_sec_t desiredSpeed;
 
 ros::Time lastSteerCmdTime;
 
+void updateDestination2() {
+    static const size_t endIdx = trajectory.size() - 1;
+
+    static double lineP = 1.0;
+    static double lineD = 0.0;
+
+    static meter_t prevDist(0);
+
+    meter_t minDist = meter_t(std::numeric_limits<unit_storage_type>::infinity());
+    size_t minIdx = 0;
+
+    for (size_t i = 0; i < trajectory.size(); ++i) {
+        const Point2m pos = trajectory[i];
+        const meter_t dist = pos.distance(car.odom.pose.pos);
+        if (dist < minDist) {
+            minIdx = i;
+            minDist = dist;
+        }
+    }
+
+    if (minIdx > endIdx) minIdx = endIdx;
+    const size_t neighbourIdx = minIdx == 0 ? 1 : trajectory[minIdx - 1].distance(car.odom.pose.pos) < trajectory[minIdx + 1].distance(car.odom.pose.pos) ? minIdx - 1 : minIdx + 1;
+
+    const Line2d line(static_cast<Point2d>(trajectory[minIdx]), static_cast<Point2d>(trajectory[neighbourIdx]));
+    const meter_t dist = meter_t(distance(line, static_cast<Point2d>(car.odom.pose.pos)));
+
+    const meter_t distFromEnd = TRAJECTORY_RESOLUTION * (endIdx - minIdx);
+
+    node->getParam("lineP", lineP);
+    node->getParam("lineD", lineD);
+
+    desiredWheelAngle = clamp(radian_t(dist.get() * lineP + (dist - prevDist).get() * lineD), -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
+    desiredSpeed = map(abs(desiredWheelAngle).get(), 0.0, MAX_WHEEL_ANGLE.get(), m_per_sec_t(1), m_per_sec_t(0.5)) * min(1.0, distFromEnd / meter_t(1.0));
+
+    prevDist = dist;
+}
+
 void updateDestination() {
     static constexpr meter_t MIN_LOOK_AHEAD = meter_t(1.5);
     static constexpr meter_t MAX_LOOK_AHEAD = meter_t(2.5);
