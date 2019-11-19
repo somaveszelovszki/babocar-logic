@@ -19,6 +19,7 @@
 #include <nav_msgs/Path.h>
 #include <environment_builder/DynamicObjectArray.h>
 #include <visualization_msgs/MarkerArray.h>
+#include <ackermann_msgs/AckermannDrive.h>
 
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
@@ -66,8 +67,7 @@ static constexpr meter_t       TRAJECTORY_RESOLUTION                 = centimete
 std::unique_ptr<VoMapBuilderNode> node = nullptr;
 
 ros::Publisher *availableVelocitiesPub = nullptr;
-ros::Publisher *steerPub = nullptr;
-ros::Publisher *motorPub = nullptr;
+ros::Publisher *ackerPub = nullptr;
 ros::Publisher *globalTrajectoryPub = nullptr;
 
 DynamicObject car(
@@ -90,18 +90,14 @@ DynamicWindow window(
     DYNAMIC_WINDOW_SPEED_RESOLUTION, DYNAMIC_WINDOW_WHEEL_ANGLE_RESOLUTION
 );
 
-int32_t steer_in = 0;
-int32_t steer_out = 0;
-
-int32_t motor_in = 0;
-int32_t motor_out = 0;
+ackermann_msgs::AckermannDrive ackerIn, ackerOut;
 
 radian_t actualWheelAngle;
 m_per_sec_t actualSpeed;
 
 std::vector<StaticObject> staticObjects;
 
-std::vector<Point2m> trajectory = {
+std::vector<Point2m> trajectory1 = {
     { meter_t(0.0), meter_t(0) },
     { meter_t(0.1), meter_t(0) },
     { meter_t(0.2), meter_t(0) },
@@ -309,11 +305,311 @@ std::vector<Point2m> trajectory = {
     { meter_t(8.0), meter_t(0.5) }
 };
 
+std::vector<Point2m> trajectory2 = {
+    { meter_t(0.0), meter_t(0) },
+    { meter_t(0.1), meter_t(0) },
+    { meter_t(0.2), meter_t(0) },
+    { meter_t(0.3), meter_t(0) },
+    { meter_t(0.4), meter_t(0) },
+    { meter_t(0.5), meter_t(0) },
+    { meter_t(0.6), meter_t(0) },
+    { meter_t(0.7), meter_t(0) },
+    { meter_t(0.8), meter_t(0) },
+    { meter_t(0.9), meter_t(0) },
+
+    { meter_t(1.0), meter_t(0) },
+    { meter_t(1.1), meter_t(0) },
+    { meter_t(1.2), meter_t(0) },
+    { meter_t(1.3), meter_t(0) },
+    { meter_t(1.4), meter_t(0) },
+    { meter_t(1.5), meter_t(0) },
+    { meter_t(1.6), meter_t(0) },
+    { meter_t(1.7), meter_t(0) },
+    { meter_t(1.8), meter_t(0) },
+    { meter_t(1.9), meter_t(0) },
+
+    { meter_t(2.0), meter_t(0) },
+    { meter_t(2.1), meter_t(0) },
+    { meter_t(2.2), meter_t(0) },
+    { meter_t(2.3), meter_t(0) },
+    { meter_t(2.4), meter_t(0) },
+    { meter_t(2.5), meter_t(0) },
+    { meter_t(2.6), meter_t(0) },
+    { meter_t(2.7), meter_t(0) },
+    { meter_t(2.8), meter_t(0) },
+    { meter_t(2.9), meter_t(0) },
+
+    { meter_t(3.0), meter_t(0) },
+    { meter_t(3.1), meter_t(0) },
+    { meter_t(3.2), meter_t(0) },
+    { meter_t(3.3), meter_t(0) },
+    { meter_t(3.4), meter_t(0) },
+    { meter_t(3.5), meter_t(0) },
+    { meter_t(3.6), meter_t(0) },
+    { meter_t(3.7), meter_t(0) },
+    { meter_t(3.8), meter_t(0) },
+    { meter_t(3.9), meter_t(0) },
+
+    { meter_t(4.0), meter_t(0) },
+    { meter_t(4.1), meter_t(-0.1) },
+    { meter_t(4.2), meter_t(-0.2) },
+    { meter_t(4.3), meter_t(-0.3) },
+    { meter_t(4.4), meter_t(-0.4) },
+    { meter_t(4.5), meter_t(-0.5) },
+    { meter_t(4.6), meter_t(-0.6) },
+    { meter_t(4.7), meter_t(-0.7) },
+    { meter_t(4.8), meter_t(-0.8) },
+    { meter_t(4.9), meter_t(-0.9) },
+
+    { meter_t(5.0), meter_t(-1) },
+    { meter_t(5.1), meter_t(-1.1) },
+    { meter_t(5.2), meter_t(-1.2) },
+    { meter_t(5.3), meter_t(-1.3) },
+    { meter_t(5.4), meter_t(-1.4) },
+    { meter_t(5.5), meter_t(-1.5) },
+    { meter_t(5.6), meter_t(-1.6) },
+    { meter_t(5.7), meter_t(-1.7) },
+    { meter_t(5.8), meter_t(-1.8) },
+    { meter_t(5.9), meter_t(-1.9) },
+
+    { meter_t(6.0), meter_t(-2) },
+    { meter_t(6.1), meter_t(-2.1) },
+    { meter_t(6.2), meter_t(-2.2) },
+    { meter_t(6.3), meter_t(-2.3) },
+    { meter_t(6.4), meter_t(-2.4) },
+    { meter_t(6.5), meter_t(-2.5) },
+    { meter_t(6.6), meter_t(-2.6) },
+    { meter_t(6.7), meter_t(-2.7) },
+    { meter_t(6.8), meter_t(-2.8) },
+    { meter_t(6.9), meter_t(-2.9) },
+
+    { meter_t(7.0), meter_t(-3) },
+    { meter_t(7.1), meter_t(-3.1) },
+    { meter_t(7.2), meter_t(-3.2) },
+    { meter_t(7.3), meter_t(-3.3) },
+    { meter_t(7.4), meter_t(-3.4) },
+    { meter_t(7.5), meter_t(-3.5) },
+    { meter_t(7.6), meter_t(-3.5) },
+    { meter_t(7.7), meter_t(-3.5) },
+    { meter_t(7.8), meter_t(-3.5) },
+    { meter_t(7.9), meter_t(-3.5) },
+
+    { meter_t(8.0), meter_t(-3.5) },
+    { meter_t(8.1), meter_t(-3.5) },
+    { meter_t(8.2), meter_t(-3.5) },
+    { meter_t(8.3), meter_t(-3.5) },
+    { meter_t(8.4), meter_t(-3.5) },
+    { meter_t(8.5), meter_t(-3.5) },
+    { meter_t(8.6), meter_t(-3.5) },
+    { meter_t(8.7), meter_t(-3.5) },
+    { meter_t(8.8), meter_t(-3.5) },
+    { meter_t(8.9), meter_t(-3.5) },
+
+    { meter_t(9.0), meter_t(-3.5) },
+    { meter_t(9.1), meter_t(-3.5) },
+    { meter_t(9.2), meter_t(-3.5) },
+    { meter_t(9.3), meter_t(-3.5) },
+    { meter_t(9.4), meter_t(-3.5) },
+    { meter_t(9.5), meter_t(-3.5) },
+    { meter_t(9.6), meter_t(-3.5) },
+    { meter_t(9.7), meter_t(-3.5) },
+    { meter_t(9.8), meter_t(-3.5) },
+    { meter_t(9.9), meter_t(-3.5) },
+
+#define X 10.0
+#define Y -5.5
+#define R 2.0
+
+    { meter_t(X + R * sin(0.00 * PI)), meter_t(Y + R * cos(0.00 * PI)) },
+    { meter_t(X + R * sin(0.05 * PI)), meter_t(Y + R * cos(0.05 * PI)) },
+    { meter_t(X + R * sin(0.10 * PI)), meter_t(Y + R * cos(0.10 * PI)) },
+    { meter_t(X + R * sin(0.15 * PI)), meter_t(Y + R * cos(0.15 * PI)) },
+    { meter_t(X + R * sin(0.20 * PI)), meter_t(Y + R * cos(0.20 * PI)) },
+    { meter_t(X + R * sin(0.25 * PI)), meter_t(Y + R * cos(0.25 * PI)) },
+    { meter_t(X + R * sin(0.30 * PI)), meter_t(Y + R * cos(0.30 * PI)) },
+    { meter_t(X + R * sin(0.35 * PI)), meter_t(Y + R * cos(0.35 * PI)) },
+    { meter_t(X + R * sin(0.40 * PI)), meter_t(Y + R * cos(0.40 * PI)) },
+    { meter_t(X + R * sin(0.45 * PI)), meter_t(Y + R * cos(0.45 * PI)) },
+    { meter_t(X + R * sin(0.50 * PI)), meter_t(Y + R * cos(0.50 * PI)) },
+    { meter_t(X + R * sin(0.55 * PI)), meter_t(Y + R * cos(0.55 * PI)) },
+    { meter_t(X + R * sin(0.60 * PI)), meter_t(Y + R * cos(0.60 * PI)) },
+    { meter_t(X + R * sin(0.65 * PI)), meter_t(Y + R * cos(0.65 * PI)) },
+    { meter_t(X + R * sin(0.70 * PI)), meter_t(Y + R * cos(0.70 * PI)) },
+    { meter_t(X + R * sin(0.75 * PI)), meter_t(Y + R * cos(0.75 * PI)) },
+    { meter_t(X + R * sin(0.80 * PI)), meter_t(Y + R * cos(0.80 * PI)) },
+    { meter_t(X + R * sin(0.85 * PI)), meter_t(Y + R * cos(0.85 * PI)) },
+    { meter_t(X + R * sin(0.90 * PI)), meter_t(Y + R * cos(0.90 * PI)) },
+    { meter_t(X + R * sin(0.95 * PI)), meter_t(Y + R * cos(0.95 * PI)) },
+    { meter_t(10), meter_t(-7.5) },
+
+#undef X
+#undef Y
+#undef R
+
+    { meter_t(9.9), meter_t(-7.5) },
+    { meter_t(9.8), meter_t(-7.5) },
+    { meter_t(9.7), meter_t(-7.5) },
+    { meter_t(9.6), meter_t(-7.5) },
+    { meter_t(9.5), meter_t(-7.5) },
+    { meter_t(9.4), meter_t(-7.5) },
+    { meter_t(9.3), meter_t(-7.5) },
+    { meter_t(9.2), meter_t(-7.5) },
+    { meter_t(9.1), meter_t(-7.5) },
+    { meter_t(9.0), meter_t(-7.5) },
+
+    { meter_t(8.9), meter_t(-7.5) },
+    { meter_t(8.8), meter_t(-7.5) },
+    { meter_t(8.7), meter_t(-7.5) },
+    { meter_t(8.6), meter_t(-7.5) },
+    { meter_t(8.5), meter_t(-7.5) },
+    { meter_t(8.4), meter_t(-7.5) },
+    { meter_t(8.3), meter_t(-7.5) },
+    { meter_t(8.2), meter_t(-7.5) },
+    { meter_t(8.1), meter_t(-7.5) },
+    { meter_t(8.0), meter_t(-7.5) },
+
+    { meter_t(7.9), meter_t(-7.5) },
+    { meter_t(7.8), meter_t(-7.5) },
+    { meter_t(7.7), meter_t(-7.5) },
+    { meter_t(7.6), meter_t(-7.5) },
+    { meter_t(7.5), meter_t(-7.5) },
+    { meter_t(7.4), meter_t(-7.5) },
+    { meter_t(7.3), meter_t(-7.5) },
+    { meter_t(7.2), meter_t(-7.5) },
+    { meter_t(7.1), meter_t(-7.5) },
+    { meter_t(7.0), meter_t(-7.5) }
+
+    // { meter_t(6.9), meter_t(-7.5) },
+    // { meter_t(6.8), meter_t(-7.5) },
+    // { meter_t(6.7), meter_t(-7.5) },
+    // { meter_t(6.6), meter_t(-7.5) },
+    // { meter_t(6.5), meter_t(-7.5) },
+    // { meter_t(6.4), meter_t(-7.5) },
+    // { meter_t(6.3), meter_t(-7.5) },
+    // { meter_t(6.2), meter_t(-7.5) },
+    // { meter_t(6.1), meter_t(-7.5) },
+    // { meter_t(6.0), meter_t(-7.5) },
+
+    // { meter_t(5.9), meter_t(-7.5) },
+    // { meter_t(5.8), meter_t(-7.5) },
+    // { meter_t(5.7), meter_t(-7.5) },
+    // { meter_t(5.6), meter_t(-7.5) },
+    // { meter_t(5.5), meter_t(-7.5) },
+    // { meter_t(5.4), meter_t(-7.5) },
+    // { meter_t(5.3), meter_t(-7.5) },
+    // { meter_t(5.2), meter_t(-7.5) },
+    // { meter_t(5.1), meter_t(-7.5) },
+    // { meter_t(5.0), meter_t(-7.5) },
+
+    // { meter_t(4.9), meter_t(-7.5) },
+    // { meter_t(4.8), meter_t(-7.5) },
+    // { meter_t(4.7), meter_t(-7.5) },
+    // { meter_t(4.6), meter_t(-7.5) },
+    // { meter_t(4.5), meter_t(-7.5) },
+    // { meter_t(4.4), meter_t(-7.5) },
+    // { meter_t(4.3), meter_t(-7.5) },
+    // { meter_t(4.2), meter_t(-7.5) },
+    // { meter_t(4.1), meter_t(-7.5) },
+    // { meter_t(4.0), meter_t(-7.5) },
+
+    // { meter_t(3.9), meter_t(-7.5) },
+    // { meter_t(3.8), meter_t(-7.5) },
+    // { meter_t(3.7), meter_t(-7.5) },
+    // { meter_t(3.6), meter_t(-7.5) },
+    // { meter_t(3.5), meter_t(-7.5) },
+    // { meter_t(3.4), meter_t(-7.5) },
+    // { meter_t(3.3), meter_t(-7.5) },
+    // { meter_t(3.2), meter_t(-7.5) },
+    // { meter_t(3.1), meter_t(-7.5) },
+    // { meter_t(3.0), meter_t(-7.5) },
+
+    // { meter_t(2.9), meter_t(-7.5) },
+    // { meter_t(2.8), meter_t(-7.5) },
+    // { meter_t(2.7), meter_t(-7.5) },
+    // { meter_t(2.6), meter_t(-7.5) },
+    // { meter_t(2.5), meter_t(-7.5) },
+    // { meter_t(2.4), meter_t(-7.5) },
+    // { meter_t(2.3), meter_t(-7.5) },
+    // { meter_t(2.2), meter_t(-7.5) },
+    // { meter_t(2.1), meter_t(-7.5) },
+    // { meter_t(2.0), meter_t(-7.5) },
+
+    // { meter_t(1.9), meter_t(-7.5) },
+    // { meter_t(1.8), meter_t(-7.5) },
+    // { meter_t(1.7), meter_t(-7.5) },
+    // { meter_t(1.6), meter_t(-7.5) },
+    // { meter_t(1.5), meter_t(-7.5) },
+    // { meter_t(1.4), meter_t(-7.5) },
+    // { meter_t(1.3), meter_t(-7.5) },
+    // { meter_t(1.2), meter_t(-7.5) },
+    // { meter_t(1.1), meter_t(-7.5) },
+    // { meter_t(1.0), meter_t(-7.5) },
+
+    // { meter_t(0.9), meter_t(-7.5) },
+    // { meter_t(0.8), meter_t(-7.5) },
+    // { meter_t(0.7), meter_t(-7.5) },
+    // { meter_t(0.6), meter_t(-7.5) },
+    // { meter_t(0.5), meter_t(-7.5) },
+    // { meter_t(0.4), meter_t(-7.5) },
+    // { meter_t(0.3), meter_t(-7.5) },
+    // { meter_t(0.2), meter_t(-7.5) },
+    // { meter_t(0.1), meter_t(-7.5) },
+    // { meter_t(0.0), meter_t(-7.5) }
+};
+
+std::vector<Point2m> trajectory3 = {
+    { meter_t(0.0), meter_t(0) },
+    { meter_t(0.1), meter_t(0) },
+    { meter_t(0.2), meter_t(0) },
+    { meter_t(0.3), meter_t(0) },
+    { meter_t(0.4), meter_t(0) },
+    { meter_t(0.5), meter_t(0) },
+    { meter_t(0.6), meter_t(0) },
+    { meter_t(0.7), meter_t(0) },
+    { meter_t(0.8), meter_t(0) },
+    { meter_t(0.9), meter_t(0) },
+
+    { meter_t(1.0), meter_t(0) },
+    { meter_t(1.1), meter_t(0) },
+    { meter_t(1.2), meter_t(0) },
+    { meter_t(1.3), meter_t(0) },
+    { meter_t(1.4), meter_t(0) },
+    { meter_t(1.5), meter_t(0) },
+    { meter_t(1.6), meter_t(0) },
+    { meter_t(1.7), meter_t(0) },
+    { meter_t(1.8), meter_t(0) },
+    { meter_t(1.9), meter_t(0) },
+
+    { meter_t(2.0), meter_t(0) },
+    { meter_t(2.1), meter_t(0) },
+    { meter_t(2.2), meter_t(0) },
+    { meter_t(2.3), meter_t(0) },
+    { meter_t(2.4), meter_t(0) },
+    { meter_t(2.5), meter_t(0) },
+    { meter_t(2.6), meter_t(0) },
+    { meter_t(2.7), meter_t(0) },
+    { meter_t(2.8), meter_t(0) },
+    { meter_t(2.9), meter_t(0) },
+
+    { meter_t(3.0), meter_t(0) },
+    { meter_t(3.1), meter_t(0) },
+    { meter_t(3.2), meter_t(0) },
+    { meter_t(3.3), meter_t(0) },
+    { meter_t(3.4), meter_t(0) },
+    { meter_t(3.5), meter_t(0) },
+    { meter_t(3.6), meter_t(0) },
+    { meter_t(3.7), meter_t(0) },
+    { meter_t(3.8), meter_t(0) },
+    { meter_t(3.9), meter_t(0) }
+};
+
+std::vector<Point2m>& trajectory = trajectory3;
+
 Point2m destination;
 radian_t desiredWheelAngle;
 m_per_sec_t desiredSpeed;
 
-ros::Time lastSteerCmdTime;
+ros::Time lastAckerCmdTime;
 
 void updateDestination2() {
     static const size_t endIdx = trajectory.size() - 1;
@@ -523,11 +819,11 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
     car.odom.update(rosTimeDiff(ros::Time::now(), carLastUpdateTime));
     carLastUpdateTime = ros::Time::now();
 
-    if (rosTimeDiff(ros::Time::now(), lastSteerCmdTime) > second_t(1)) {
+    if (rosTimeDiff(ros::Time::now(), lastAckerCmdTime) > second_t(1)) {
         updateDestination();
     } else {
-        desiredWheelAngle = bcr::map(static_cast<double>(steer_in), -500.0, 500.0, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
-        desiredSpeed = bcr::map(motor_in, -500, 500, m_per_sec_t(-1), m_per_sec_t(1));
+        desiredWheelAngle = bcr::map(ackerIn.steering_angle, -500.0f, 500.0f, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
+        desiredSpeed = bcr::map(ackerIn.speed, -500.0f, 500.0f, m_per_sec_t(-1), m_per_sec_t(1));
     }
 
     std::vector<ObjectTrajectory> dynamicObjectTrajectories;
@@ -631,8 +927,8 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
         //control = safestControl;
     }
 
-    steer_out = bcr::map(control.wheelAngle, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE, -500.0, 500.0);
-    motor_out = bcr::map(control.speed, MAX_SPEED_BWD, MAX_SPEED_FWD, -500.0, 500.0);
+    ackerOut.steering_angle = bcr::map(control.wheelAngle, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE, -500.0f, 500.0f);
+    ackerOut.speed = bcr::map(control.speed, MAX_SPEED_BWD, MAX_SPEED_FWD, -500.0f, 500.0f);
 
     sendAvailableVelocities();
     sendGlobalTrajectory();
@@ -647,15 +943,12 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
     carOdom_ros = *odom;
     car.odom = bcr::ros_convert(*odom);
 
-    actualWheelAngle = bcr::map(static_cast<double>(steer_out), -500.0, 500.0, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
-    actualSpeed = bcr::map(motor_out, -500, 500, m_per_sec_t(-1), m_per_sec_t(1));
+    actualSpeed = car.odom.twist.speed.length();
+    actualWheelAngle = bcr::map(ackerOut.steering_angle, -500.0f, 500.0f, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
 
-    //car.odom.twist.speed = (car.odom.pose.pos - prevOdom.pose.pos) / d_time;
-    //car.odom.twist.speed *= abs(actualSpeed) / car.odom.twist.speed.length();
-    car.odom.twist.speed = Vec2mps(actualSpeed, m_per_sec_t(0)).rotate(car.odom.pose.angle);
-
-    //car.odom.twist.ang_vel = (car.odom.pose.angle - prevOdom.pose.angle) / d_time;
-    car.odom.twist.ang_vel = getAngularVelocity(CAR_FRONT_REAR_WHEEL_AXIS_DIST, actualSpeed, actualWheelAngle);
+    //actualSpeed = bcr::map(ackerOut.speed, -500.0f, 500.0f, m_per_sec_t(-1), m_per_sec_t(1));
+    //car.odom.twist.speed = Vec2mps(actualSpeed, m_per_sec_t(0)).rotate(car.odom.pose.angle);
+    //car.odom.twist.ang_vel = getAngularVelocity(CAR_FRONT_REAR_WHEEL_AXIS_DIST, actualSpeed, actualWheelAngle);
 
     car.updateCirclePositions();
 
@@ -668,31 +961,16 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
         car.odom.twist.speed.X.get(), car.odom.twist.speed.Y.get(), static_cast<deg_per_sec_t>(car.odom.twist.ang_vel).get());
 }
 
-void steerCallback(const std_msgs::String::ConstPtr& cmd) {
+void ackerCallback(const ackermann_msgs::AckermannDrive::ConstPtr& ackermannMsg) {
 
-    lastSteerCmdTime = ros::Time::now();
-    const std::regex regex("SET STEER_REF (-?\\d+)/0");
-    std::smatch match;
-    if (std::regex_match(cmd->data, match, regex) && match.size() == 2) {
-        steer_in = std::stoi(match[1]);
-    }
-}
-
-void motorCallback(const std_msgs::String::ConstPtr& cmd) {
-
-    const std::regex regex("SET PWM (-?\\d+)/0");
-    std::smatch match;
-    if (std::regex_match(cmd->data, match, regex) && match.size() == 2) {
-        motor_in = std::stoi(match[1]);
-    }
+    lastAckerCmdTime = ros::Time::now();
+    ackerIn.speed = ackermannMsg->speed;
+    ackerIn.steering_angle = ackermannMsg->steering_angle;
 }
 
 void* publishControlData(void *argument) {
     while (true) {
-        std_msgs::String steer_msg;
-        steer_msg.data = "SET STEER_REF " + std::to_string(steer_out) + " " + std::to_string(motor_out) + "/0";
-        steerPub->publish(steer_msg);
-
+        ackerPub->publish(ackerOut);
         usleep(50000);
     }
 
@@ -709,17 +987,13 @@ int main(int argc, char **argv)
     ros::Subscriber odomSub = node->subscribe<nav_msgs::Odometry>("odom", 1, odomCallback);
     ros::Subscriber staticGridSub = node->subscribe<nav_msgs::OccupancyGrid>("static_grid", 1, staticGridCallback);
     ros::Subscriber dynObjSub = node->subscribe<environment_builder::DynamicObjectArray>("dynamic_objects", 1, dynObjCallback);
-    ros::Subscriber steerSub = node->subscribe<std_msgs::String>("steer_orig", 1, steerCallback);
-    ros::Subscriber motorSub = node->subscribe<std_msgs::String>("motor_orig", 1, motorCallback);
+    ros::Subscriber ackerSub = node->subscribe<ackermann_msgs::AckermannDrive>("/vrcar/filtered_control_orig", 1, ackerCallback);
 
     ros::Publisher availableVelocitiesPublisher = node->advertise<visualization_msgs::MarkerArray>("available_velocities", 10);
     availableVelocitiesPub = &availableVelocitiesPublisher;
 
-    ros::Publisher steerPublisher = node->advertise<std_msgs::String>("steer", 10);
-    steerPub = &steerPublisher;
-
-    ros::Publisher motorPublisher = node->advertise<std_msgs::String>("motor", 10);
-    motorPub = &motorPublisher;
+    ros::Publisher ackerPublisher = node->advertise<ackermann_msgs::AckermannDrive>("/vrcar/filtered_control", 10);
+    ackerPub = &ackerPublisher;
 
     ros::Publisher globalTrajectoryPublisher = node->advertise<nav_msgs::Path>("globalTrajectory", 10);
     globalTrajectoryPub = &globalTrajectoryPublisher;
