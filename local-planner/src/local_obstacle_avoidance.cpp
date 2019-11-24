@@ -31,6 +31,8 @@
 
 using namespace bcr;
 
+#define SIMULATION false
+
 namespace {
 
 class VoMapBuilderNode : public RosNode {
@@ -52,15 +54,16 @@ static constexpr meter_t       CAR_FRONT_REAR_WHEEL_AXIS_DIST        = centimete
 static constexpr m_per_sec_t   MAX_SPEED_BWD                         = m_per_sec_t(-1.0);
 static constexpr m_per_sec_t   MAX_SPEED_FWD                         = m_per_sec_t(1.0);
 static constexpr radian_t      MAX_WHEEL_ANGLE                       = radian_t(0.5);
-static constexpr m_per_sec2_t  MAX_ACCELERATION                      = m_per_sec2_t(0.5);
+static constexpr m_per_sec2_t  MAX_ACCELERATION                      = m_per_sec2_t(2.0);
 static constexpr rad_per_sec_t MAX_WHEEL_ANGULAR_VELOCITY            = degree_t(60) / second_t(1.0);
  
 static constexpr m_per_sec_t   DYNAMIC_WINDOW_SPEED_RESOLUTION       = m_per_sec_t(0.01);
 static constexpr radian_t      DYNAMIC_WINDOW_WHEEL_ANGLE_RESOLUTION = degree_t(1);
  
-static constexpr meter_t       MAX_OBSTACLE_DISTANCE                 = meter_t(5);
+static constexpr meter_t       MAX_STATIC_OBSTACLE_DISTANCE          = meter_t(3);
+static constexpr meter_t       MAX_DYNAMIC_OBSTACLE_DISTANCE         = meter_t(6);
 static constexpr millisecond_t COLLISION_CHECK_TIME_STEP             = millisecond_t(100);
-static constexpr meter_t       MIN_KEPT_DISTANCE                     = centimeter_t(25);
+static constexpr meter_t       MIN_KEPT_DISTANCE                     = centimeter_t(10);
 
 static constexpr meter_t       TRAJECTORY_RESOLUTION                 = centimeter_t(10);
 
@@ -600,7 +603,29 @@ std::vector<Point2m> trajectory3 = {
     { meter_t(3.6), meter_t(0) },
     { meter_t(3.7), meter_t(0) },
     { meter_t(3.8), meter_t(0) },
-    { meter_t(3.9), meter_t(0) }
+    { meter_t(3.9), meter_t(0) },
+
+    { meter_t(4.0), meter_t(0) },
+    { meter_t(4.1), meter_t(0) },
+    { meter_t(4.2), meter_t(0) },
+    { meter_t(4.3), meter_t(0) },
+    { meter_t(4.4), meter_t(0) },
+    { meter_t(4.5), meter_t(0) },
+    { meter_t(4.6), meter_t(0) },
+    { meter_t(4.7), meter_t(0) },
+    { meter_t(4.8), meter_t(0) },
+    { meter_t(4.9), meter_t(0) },
+
+    { meter_t(5.0), meter_t(0) },
+    { meter_t(5.1), meter_t(0) },
+    { meter_t(5.2), meter_t(0) },
+    { meter_t(5.3), meter_t(0) },
+    { meter_t(5.4), meter_t(0) },
+    { meter_t(5.5), meter_t(0) },
+    { meter_t(5.6), meter_t(0) },
+    { meter_t(5.7), meter_t(0) },
+    { meter_t(5.8), meter_t(0) },
+    { meter_t(5.9), meter_t(0) }
 };
 
 std::vector<Point2m>& trajectory = trajectory3;
@@ -643,14 +668,14 @@ void updateDestination2() {
     node->getParam("lineD", lineD);
 
     desiredWheelAngle = clamp(radian_t(dist.get() * lineP + (dist - prevDist).get() * lineD), -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
-    desiredSpeed = map(abs(desiredWheelAngle).get(), 0.0, MAX_WHEEL_ANGLE.get(), m_per_sec_t(1), m_per_sec_t(0.5)) * min(1.0, distFromEnd / meter_t(1.0));
+    desiredSpeed = map(abs(desiredWheelAngle).get(), 0.0, MAX_WHEEL_ANGLE.get(), m_per_sec_t(0.3), m_per_sec_t(0.3)) * min(1.0, distFromEnd / meter_t(1.0));
 
     prevDist = dist;
 }
 
 void updateDestination() {
-    static constexpr meter_t MIN_LOOK_AHEAD = meter_t(1.5);
-    static constexpr meter_t MAX_LOOK_AHEAD = meter_t(2.5);
+    static constexpr meter_t MIN_LOOK_AHEAD = meter_t(1.0);
+    static constexpr meter_t MAX_LOOK_AHEAD = meter_t(1.2);
 
     static const size_t endIdx = trajectory.size() - 1;
 
@@ -710,7 +735,12 @@ void updateDestination() {
     const meter_t distFromEnd = TRAJECTORY_RESOLUTION * (endIdx - minIdx);
 
     desiredWheelAngle = getTrajectoryWheelAngle(CAR_FRONT_REAR_WHEEL_AXIS_DIST, car.odom.pose.pos, car.odom.pose.angle, destination);
-    desiredSpeed = map(abs(desiredWheelAngle).get(), 0.0, MAX_WHEEL_ANGLE.get(), m_per_sec_t(1), m_per_sec_t(0.5)) * min(1.0, distFromEnd / meter_t(1.0));
+    if (std::isnan(desiredWheelAngle.get())) desiredWheelAngle = radian_t(0);
+    //desiredSpeed = map(abs(desiredWheelAngle).get(), 0.0, MAX_WHEEL_ANGLE.get(), m_per_sec_t(0.6), m_per_sec_t(0.5)) * min(1.0, distFromEnd / meter_t(1.0));
+    desiredSpeed = m_per_sec_t(0.8);
+    if (distFromEnd < meter_t(1)) {
+        desiredSpeed *= distFromEnd / meter_t(1);
+    }
 }
 
 nanosecond_t rosTimeDiff(const ros::Time& t1, const ros::Time& t2) {
@@ -803,7 +833,7 @@ void staticGridCallback(const nav_msgs::OccupancyGrid::ConstPtr& staticGrid) {
                 }
             }
 
-            if (ok && absPoint.distance(car.odom.pose.pos) < MAX_OBSTACLE_DISTANCE) {
+            if (ok && absPoint.distance(car.odom.pose.pos) < MAX_STATIC_OBSTACLE_DISTANCE) {
                 staticObjects.push_back({ centimeter_t(1), absPoint });
             }
         }
@@ -819,12 +849,14 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
     car.odom.update(rosTimeDiff(ros::Time::now(), carLastUpdateTime));
     carLastUpdateTime = ros::Time::now();
 
-    if (rosTimeDiff(ros::Time::now(), lastAckerCmdTime) > second_t(1)) {
-        updateDestination();
-    } else {
-        desiredWheelAngle = bcr::map(ackerIn.steering_angle, -500.0f, 500.0f, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
-        desiredSpeed = bcr::map(ackerIn.speed, -500.0f, 500.0f, m_per_sec_t(-1), m_per_sec_t(1));
-    }
+    // if (rosTimeDiff(ros::Time::now(), lastAckerCmdTime) > second_t(1)) {
+    //     updateDestination();
+    // } else {
+    //     desiredWheelAngle = bcr::map(ackerIn.steering_angle, -500.0f, 500.0f, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
+    //     desiredSpeed = bcr::map(ackerIn.speed, -500.0f, 500.0f, m_per_sec_t(-1), m_per_sec_t(1));
+    // }
+
+    updateDestination();
 
     std::vector<ObjectTrajectory> dynamicObjectTrajectories;
     dynamicObjectTrajectories.reserve(dynamicObjectArray->objects.size());
@@ -849,16 +881,18 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
     for (const environment_builder::DynamicObject& o : dynamicObjectArray->objects) {
         DynamicObject obj = bcr::ros_convert(o);
 
-        bool ok = true;
-        for (size_t r = 0; r < car.radiuses.size(); ++r) {
-            if (car.positions[r].distance(obj.odom.pose.pos) < car.radiuses[r].second + obj.radiuses[0].second) {
-                ok = false;
-                break;
+        if (obj.odom.pose.pos.distance(car.odom.pose.pos) <= MAX_DYNAMIC_OBSTACLE_DISTANCE) {
+            bool ok = true;
+            for (size_t r = 0; r < car.radiuses.size(); ++r) {
+                if (car.positions[r].distance(obj.odom.pose.pos) < car.radiuses[r].second + obj.radiuses[0].second) {
+                    ok = false;
+                    break;
+                }
             }
-        }
 
-        if (ok) {
-            dynamicObjectTrajectories.push_back(getTrajectory(obj, collisionCheckTimeInterval(maxStopTime), COLLISION_CHECK_TIME_STEP));
+            if (ok) {
+                dynamicObjectTrajectories.push_back(getTrajectory(obj, collisionCheckTimeInterval(maxStopTime), COLLISION_CHECK_TIME_STEP));
+            }
         }
     }
 
@@ -886,9 +920,9 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
                 vo.directionFactor = bcr::map(abs(vo.wheelAngle - desiredWheelAngle), radian_t(0), 2 * MAX_WHEEL_ANGLE, 1.0f, 0.0f);
                 vo.speedFactor     = bcr::map(abs(vo.speed - desiredSpeed), m_per_sec_t(0), MAX_SPEED_FWD - MAX_SPEED_BWD, 1.0f, 0.0f);
 
-                ROS_INFO("Update - VO: %f m/s | %f deg\t-> stopTime: %f sec | collisionTime: %f sec -> %f",
-                    vo.speed.get(), static_cast<degree_t>(vo.wheelAngle).get(),
-                    static_cast<second_t>(stopTime).get(), static_cast<second_t>(collisionTime).get(), vo.safetyFactor);
+                // ROS_INFO("Update - VO: %f m/s | %f deg\t-> stopTime: %f sec | collisionTime: %f sec -> %f",
+                //     vo.speed.get(), static_cast<degree_t>(vo.wheelAngle).get(),
+                //     static_cast<second_t>(stopTime).get(), static_cast<second_t>(collisionTime).get(), vo.safetyFactor);
             } else {
                 vo.safetyFactor = 0.0f;
                 vo.directionFactor = 0.0f;
@@ -905,11 +939,11 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
         for (VelocityObstacle& vo : vos) {
             const float32_t factor = vo.getFactor(W_SAFETY_FACTOR, W_DIRECTION_FACTOR, W_SPEED_FACTOR);
 
-            ROS_INFO("Evaluate - VO: %f m/s | %f deg\t-> safety (%f), dir (%f), speed (%f) = %f%s",
-                vo.speed.get(), static_cast<degree_t>(vo.wheelAngle).get(),
-                vo.safetyFactor, vo.directionFactor, vo.speedFactor,
-                factor,
-                factor > maxFactor ? " -> new max" : "");
+            // ROS_INFO("Evaluate - VO: %f m/s | %f deg\t-> safety (%f), dir (%f), speed (%f) = %f%s",
+            //     vo.speed.get(), static_cast<degree_t>(vo.wheelAngle).get(),
+            //     vo.safetyFactor, vo.directionFactor, vo.speedFactor,
+            //     factor,
+            //     factor > maxFactor ? " -> new max" : "");
 
             if (factor > maxFactor) {
                 control = vo;
@@ -928,7 +962,7 @@ void dynObjCallback(const environment_builder::DynamicObjectArray::ConstPtr& dyn
     }
 
     ackerOut.steering_angle = bcr::map(control.wheelAngle, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE, -500.0f, 500.0f);
-    ackerOut.speed = bcr::map(control.speed, MAX_SPEED_BWD, MAX_SPEED_FWD, -500.0f, 500.0f);
+    ackerOut.speed = bcr::map(control.speed, MAX_SPEED_BWD, MAX_SPEED_FWD, -300.0f, 300.0f);
 
     sendAvailableVelocities();
     sendGlobalTrajectory();
@@ -943,12 +977,14 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& odom) {
     carOdom_ros = *odom;
     car.odom = bcr::ros_convert(*odom);
 
+#if SIMULATION
+    actualSpeed = bcr::map(ackerOut.speed, -500.0f, 500.0f, m_per_sec_t(-1), m_per_sec_t(1));
+    car.odom.twist.speed = Vec2mps(actualSpeed, m_per_sec_t(0)).rotate(car.odom.pose.angle);
+    car.odom.twist.ang_vel = getAngularVelocity(CAR_FRONT_REAR_WHEEL_AXIS_DIST, actualSpeed, actualWheelAngle);
+#else
     actualSpeed = car.odom.twist.speed.length();
     actualWheelAngle = bcr::map(ackerOut.steering_angle, -500.0f, 500.0f, -MAX_WHEEL_ANGLE, MAX_WHEEL_ANGLE);
-
-    //actualSpeed = bcr::map(ackerOut.speed, -500.0f, 500.0f, m_per_sec_t(-1), m_per_sec_t(1));
-    //car.odom.twist.speed = Vec2mps(actualSpeed, m_per_sec_t(0)).rotate(car.odom.pose.angle);
-    //car.odom.twist.ang_vel = getAngularVelocity(CAR_FRONT_REAR_WHEEL_AXIS_DIST, actualSpeed, actualWheelAngle);
+#endif
 
     car.updateCirclePositions();
 
@@ -970,6 +1006,7 @@ void ackerCallback(const ackermann_msgs::AckermannDrive::ConstPtr& ackermannMsg)
 
 void* publishControlData(void *argument) {
     while (true) {
+        ROS_INFO("out: speed: %f | angle: %f", ackerOut.speed, ackerOut.steering_angle);
         ackerPub->publish(ackerOut);
         usleep(50000);
     }
@@ -992,7 +1029,7 @@ int main(int argc, char **argv)
     ros::Publisher availableVelocitiesPublisher = node->advertise<visualization_msgs::MarkerArray>("available_velocities", 10);
     availableVelocitiesPub = &availableVelocitiesPublisher;
 
-    ros::Publisher ackerPublisher = node->advertise<ackermann_msgs::AckermannDrive>("/vrcar/filtered_control", 10);
+    ros::Publisher ackerPublisher = node->advertise<ackermann_msgs::AckermannDrive>("/vrcar/manual_control", 10);
     ackerPub = &ackerPublisher;
 
     ros::Publisher globalTrajectoryPublisher = node->advertise<nav_msgs::Path>("globalTrajectory", 10);

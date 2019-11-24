@@ -45,7 +45,7 @@ public:
 
     nav_msgs::OccupancyGrid grid;   // TODO use only one implementation (this or own)
 
-private:
+public:
     CellState get(const Point2<uint32_t>& pos) const;
 
     void set(const Point2<uint32_t>& pos, CellState state);
