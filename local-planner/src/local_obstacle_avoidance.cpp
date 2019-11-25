@@ -1032,7 +1032,7 @@ int main(int argc, char **argv)
     ros::Publisher ackerPublisher = node->advertise<ackermann_msgs::AckermannDrive>("/vrcar/manual_control", 10);
     ackerPub = &ackerPublisher;
 
-    ros::Publisher globalTrajectoryPublisher = node->advertise<nav_msgs::Path>("globalTrajectory", 10);
+    ros::Publisher globalTrajectoryPublisher = node->advertise<nav_msgs::Path>("global_trajectory", 10);
     globalTrajectoryPub = &globalTrajectoryPublisher;
 
     pthread_t t;
