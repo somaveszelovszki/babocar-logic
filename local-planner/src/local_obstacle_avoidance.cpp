@@ -60,10 +60,10 @@ static constexpr rad_per_sec_t MAX_WHEEL_ANGULAR_VELOCITY            = degree_t(
 static constexpr m_per_sec_t   DYNAMIC_WINDOW_SPEED_RESOLUTION       = m_per_sec_t(0.01);
 static constexpr radian_t      DYNAMIC_WINDOW_WHEEL_ANGLE_RESOLUTION = degree_t(1);
  
-static constexpr meter_t       MAX_STATIC_OBSTACLE_DISTANCE          = meter_t(3);
+static constexpr meter_t       MAX_STATIC_OBSTACLE_DISTANCE          = meter_t(5);
 static constexpr meter_t       MAX_DYNAMIC_OBSTACLE_DISTANCE         = meter_t(6);
 static constexpr millisecond_t COLLISION_CHECK_TIME_STEP             = millisecond_t(100);
-static constexpr meter_t       MIN_KEPT_DISTANCE                     = centimeter_t(10);
+static constexpr meter_t       MIN_KEPT_DISTANCE                     = centimeter_t(25);
 
 static constexpr meter_t       TRAJECTORY_RESOLUTION                 = centimeter_t(10);
 
@@ -625,7 +625,51 @@ std::vector<Point2m> trajectory3 = {
     { meter_t(5.6), meter_t(0) },
     { meter_t(5.7), meter_t(0) },
     { meter_t(5.8), meter_t(0) },
-    { meter_t(5.9), meter_t(0) }
+    { meter_t(5.9), meter_t(0) },
+
+    { meter_t(6.0), meter_t(0) },
+    { meter_t(6.1), meter_t(0) },
+    { meter_t(6.2), meter_t(0) },
+    { meter_t(6.3), meter_t(0) },
+    { meter_t(6.4), meter_t(0) },
+    { meter_t(6.5), meter_t(0) },
+    { meter_t(6.6), meter_t(0) },
+    { meter_t(6.7), meter_t(0) },
+    { meter_t(6.8), meter_t(0) },
+    { meter_t(6.9), meter_t(0) },
+
+    { meter_t(7.0), meter_t(0) },
+    { meter_t(7.1), meter_t(0) },
+    { meter_t(7.2), meter_t(0) },
+    { meter_t(7.3), meter_t(0) },
+    { meter_t(7.4), meter_t(0) },
+    { meter_t(7.5), meter_t(0) },
+    { meter_t(7.6), meter_t(0) },
+    { meter_t(7.7), meter_t(0) },
+    { meter_t(7.8), meter_t(0) },
+    { meter_t(7.9), meter_t(0) },
+
+    { meter_t(8.0), meter_t(0) },
+    { meter_t(8.1), meter_t(0) },
+    { meter_t(8.2), meter_t(0) },
+    { meter_t(8.3), meter_t(0) },
+    { meter_t(8.4), meter_t(0) },
+    { meter_t(8.5), meter_t(0) },
+    { meter_t(8.6), meter_t(0) },
+    { meter_t(8.7), meter_t(0) },
+    { meter_t(8.8), meter_t(0) },
+    { meter_t(8.9), meter_t(0) },
+
+    { meter_t(9.0), meter_t(0) },
+    { meter_t(9.1), meter_t(0) },
+    { meter_t(9.2), meter_t(0) },
+    { meter_t(9.3), meter_t(0) },
+    { meter_t(9.4), meter_t(0) },
+    { meter_t(9.5), meter_t(0) },
+    { meter_t(9.6), meter_t(0) },
+    { meter_t(9.7), meter_t(0) },
+    { meter_t(9.8), meter_t(0) },
+    { meter_t(9.9), meter_t(0) }
 };
 
 std::vector<Point2m>& trajectory = trajectory3;
