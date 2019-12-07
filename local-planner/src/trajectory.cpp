@@ -66,7 +66,7 @@ radian_t getTrajectoryWheelAngle(meter_t carFrontRearWheelAxisDist, const Point2
     }
     else
     {
-        wheelAngle = PI_2;
+        wheelAngle = radian_t(0);
     }
 
     return wheelAngle;

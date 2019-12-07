@@ -21,5 +21,5 @@ TEST(trajectory, getTrajectoryWheelAngle_left) {
     const Point2m destPos = { meter_t(-5), meter_t(-5) };
     const radian_t ori = degree_t(-90);
 
-    EXPECT_NEAR((bcr::atan2(carFrontRearWheelAxisDist.get(), 5.0)).get(), getTrajectoryWheelAngle(carFrontRearWheelAxisDist, carPos, ori, destPos).get(), 0.1);
+    EXPECT_NEAR((bcr::atan2(-carFrontRearWheelAxisDist.get(), 5.0)).get(), getTrajectoryWheelAngle(carFrontRearWheelAxisDist, carPos, ori, destPos).get(), 0.1);
 }
